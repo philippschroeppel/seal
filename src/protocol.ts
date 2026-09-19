@@ -1,5 +1,5 @@
 import type { ErrorCode } from "./errors.js";
-import type { SecretName, SessionToken } from "./types.js";
+import { isRecord, type SecretName, type SessionToken } from "./types.js";
 
 /** Environment variables the broker injects into a child process. */
 export const ENV = {
@@ -66,6 +66,3 @@ export function parseDecryptResponse(line: string): DecryptResponse {
   return { ok: false, error: raw.error as ErrorCode, message: raw.message };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}

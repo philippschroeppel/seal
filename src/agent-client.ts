@@ -1,18 +1,25 @@
 import { type ErrorCode, SealError } from "./errors.js";
+import type {
+  CheckIntent,
+  CheckResult,
+  HttpIntent,
+  SessionCapabilities,
+  SignIntent,
+} from "./intents.js";
 import { ENV } from "./protocol.js";
-import type { SessionToken } from "./types.js";
+import { isRecord, type SessionToken } from "./types.js";
+
+export type {
+  CheckIntent,
+  CheckResult,
+  HttpIntent,
+  SessionCapabilities,
+  SignIntent,
+} from "./intents.js";
 
 export interface AgentConnection {
   readonly url: string;
   readonly token: SessionToken;
-}
-
-export interface HttpRequest {
-  readonly identity: string;
-  readonly method: string;
-  readonly url: string;
-  readonly headers?: Readonly<Record<string, string>>;
-  readonly body?: unknown;
 }
 
 export interface HttpResponse {
@@ -21,38 +28,20 @@ export interface HttpResponse {
   readonly body: string;
 }
 
-export interface SignRequest {
-  readonly identity: string;
-  readonly payload: string;
-  readonly format: string;
-}
-
 export interface SignResponse {
   readonly signature: string;
-}
-
-export interface SessionCapabilities {
-  readonly session: string;
-  readonly ops: readonly string[];
-  readonly identities: readonly {
-    readonly name: string;
-    readonly ops: readonly string[];
-    readonly approve: string;
-    readonly peers?: readonly string[];
-    readonly formats?: readonly string[];
-  }[];
-  readonly openapi: string;
 }
 
 export const agent = {
   http: postHttp,
   sign: postSign,
+  check: postCheck,
   capabilities: getCapabilities,
   openapi: getOpenApi,
 };
 
 export function postHttp(
-  request: HttpRequest,
+  request: HttpIntent,
   connection?: AgentConnection,
 ): Promise<HttpResponse> {
   return call("/v1/http", {
@@ -82,7 +71,7 @@ export function postHttp(
 }
 
 export function postSign(
-  request: SignRequest,
+  request: SignIntent,
   connection?: AgentConnection,
 ): Promise<SignResponse> {
   return call("/v1/sign", {
@@ -94,6 +83,29 @@ export function postSign(
         throw new SealError("protocol", "malformed sign response");
       }
       return { signature: raw.signature };
+    },
+  });
+}
+
+export function postCheck(
+  request: CheckIntent,
+  connection?: AgentConnection,
+): Promise<CheckResult> {
+  return call("/v1/check", {
+    method: "POST",
+    body: request,
+    connection,
+    parse: (raw) => {
+      if (!isRecord(raw) || typeof raw.allowed !== "boolean") {
+        throw new SealError("protocol", "malformed check response");
+      }
+      if (raw.allowed) {
+        return { allowed: true };
+      }
+      if (raw.reason !== "forbidden" && raw.reason !== "approval_required") {
+        throw new SealError("protocol", "malformed check response");
+      }
+      return { allowed: false, reason: raw.reason };
     },
   });
 }
@@ -129,9 +141,7 @@ export function getCapabilities(
           return [
             {
               name: item.name,
-              ops: item.ops.filter(
-                (op): op is string => typeof op === "string",
-              ),
+              ops: item.ops.filter((op): op is string => typeof op === "string"),
               approve: item.approve,
               ...(Array.isArray(item.peers)
                 ? {
@@ -219,8 +229,4 @@ async function call<T>(
     );
   }
   return options.parse(raw);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

@@ -1,15 +1,15 @@
-import { randomUUID } from "node:crypto";
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
-import { bytesToHex, randomBytes } from "@noble/ciphers/utils.js";
-import { wipe } from "./bytes.js";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { RunResult, SpawnOptions } from "./child.js";
 import { spawnChild } from "./child.js";
 import { type ErrorCode, SealError } from "./errors.js";
+import type {
+  CheckIntent,
+  CheckResult,
+  HttpIntent,
+  PendingIntent,
+  SessionCapabilities,
+  SignIntent,
+} from "./intents.js";
 import {
   approvalMode,
   type IdentityBinding,
@@ -19,8 +19,8 @@ import {
 import { OPENAPI_DOCUMENT } from "./openapi.js";
 import { createCedarPdp, type PolicyDecisionPoint } from "./pdp.js";
 import { ENV } from "./protocol.js";
-import { generateKeyPair } from "./seal.js";
-import type { SecretStore, SessionToken } from "./types.js";
+import { openGrantLease } from "./session.js";
+import { isRecord, type SecretStore, type SessionToken } from "./types.js";
 import {
   attachBearer,
   fetchPeer,
@@ -33,23 +33,17 @@ import {
   withUnsealedSecret,
 } from "./use.js";
 
-const BODY_LIMIT = 1_000_000;
-const CHILD_SECRET_ENV = [
-  "GITHUB_TOKEN",
-  "GH_TOKEN",
-  "SSH_AUTH_SOCK",
-  "GNUPGHOME",
-  "AWS_SECRET_ACCESS_KEY",
-  "AWS_ACCESS_KEY_ID",
-  "OPENAI_API_KEY",
-  "ANTHROPIC_API_KEY",
-];
+export type {
+  CheckIntent,
+  CheckResult,
+  HttpIntent,
+  PendingIntent,
+  SignIntent,
+} from "./intents.js";
+export { formatPendingIntent } from "./intents.js";
 
-export interface PendingIntent {
-  readonly op: "http" | "sign";
-  readonly identity: string;
-  readonly detail: string;
-}
+const BODY_LIMIT = 1_000_000;
+const CHILD_UNSET = ["SEAL_SOCK", "SSH_AUTH_SOCK", "GNUPGHOME"];
 
 export type Approver = (intent: PendingIntent) => Promise<boolean>;
 
@@ -71,20 +65,6 @@ export interface AgentSession {
 
 export interface RunManifestOptions extends AgentSessionOptions, SpawnOptions {}
 
-export interface HttpIntent {
-  readonly identity: string;
-  readonly method: string;
-  readonly url: string;
-  readonly headers?: Readonly<Record<string, string>>;
-  readonly body?: unknown;
-}
-
-export interface SignIntent {
-  readonly identity: string;
-  readonly payload: string;
-  readonly format: string;
-}
-
 interface SessionState {
   readonly store: SecretStore;
   readonly grantId: string;
@@ -101,37 +81,29 @@ interface SessionState {
 export async function startAgentSession(
   options: AgentSessionOptions,
 ): Promise<AgentSession> {
-  const ttlMs = options.ttlMs ?? options.manifest.ttlMs;
-  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
-    throw new Error("ttlMs must be a positive number");
-  }
   if (options.manifest.identities.length === 0) {
     throw new Error("manifest identities must not be empty");
   }
 
-  const grantId = randomUUID();
-  const sessionId = options.sessionId ?? options.manifest.sessionId ?? grantId;
-  const token: SessionToken = bytesToHex(randomBytes(16));
-  const { publicKey, secretKey } = generateKeyPair();
-  const secretNames = options.manifest.identities.map(
-    (identity) => identity.secret,
-  );
-  options.store.issueGrant(grantId, secretNames, publicKey, ttlMs);
+  const ttlMs = options.ttlMs ?? options.manifest.ttlMs;
+  const lease = openGrantLease({
+    store: options.store,
+    secretNames: options.manifest.identities.map((identity) => identity.secret),
+    ttlMs,
+  });
+  const sessionId = options.sessionId ?? options.manifest.sessionId ?? lease.grantId;
 
   const pdp = await createCedarPdp({
     policies: options.manifest.policies,
-    ...(options.manifest.schema === undefined
-      ? {}
-      : { schema: options.manifest.schema }),
     identities: options.manifest.identities.map((identity) => identity.name),
     sessionId,
   });
 
   const state: SessionState = {
     store: options.store,
-    grantId,
-    secretKey,
-    token,
+    grantId: lease.grantId,
+    secretKey: lease.secretKey,
+    token: lease.token,
     sessionId,
     identities: new Map(
       options.manifest.identities.map((identity) => [identity.name, identity]),
@@ -148,25 +120,12 @@ export async function startAgentSession(
 
   const { url } = await listenLoopback(server);
 
-  const expire = () => {
-    options.store.revokeGrant(grantId);
-    wipe(secretKey);
+  return {
+    url,
+    token: lease.token,
+    sessionId,
+    close: () => lease.close(() => server.close()),
   };
-
-  let closed = false;
-  const close = () => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    clearTimeout(ttlTimer);
-    expire();
-    server.close();
-  };
-
-  const ttlTimer = setTimeout(expire, ttlMs);
-
-  return { url, token, sessionId, close };
 }
 
 export async function runWithManifest(
@@ -180,7 +139,7 @@ export async function runWithManifest(
         [ENV.url]: session.url,
         [ENV.token]: session.token,
       },
-      [ENV.socket, ...CHILD_SECRET_ENV, ...secretEnvKeys(options.manifest)],
+      [...CHILD_UNSET, ...secretEnvKeys(options.manifest)],
     );
   } finally {
     session.close();
@@ -205,13 +164,10 @@ async function handleHttp(
     }
 
     if (req.method === "GET" && url.pathname === "/v1/capabilities") {
-      sendJson(res, 200, capabilities(state));
+      sendJson(res, 200, { ok: true, ...capabilities(state) });
       return;
     }
-    if (
-      req.method === "GET" &&
-      (url.pathname === "/v1/openapi.json" || url.pathname === "/openapi.json")
-    ) {
+    if (req.method === "GET" && url.pathname === "/v1/openapi.json") {
       sendJson(res, 200, OPENAPI_DOCUMENT);
       return;
     }
@@ -226,6 +182,11 @@ async function handleHttp(
       sendJson(res, 200, await performSign(state, intent));
       return;
     }
+    if (req.method === "POST" && url.pathname === "/v1/check") {
+      const intent = parseCheckIntent(await readJson(req));
+      sendJson(res, 200, { ok: true, ...performCheck(state, intent) });
+      return;
+    }
 
     sendError(res, 404, "bad_request", "unknown endpoint");
   } catch (error) {
@@ -237,25 +198,12 @@ async function performHttp(
   state: SessionState,
   intent: HttpIntent,
 ): Promise<Record<string, unknown>> {
-  const identity = requireIdentity(state, intent.identity);
-  if (identity.attach.type !== "bearer") {
-    throw new SealError("unsupported_op", "identity cannot perform http");
-  }
-  const method = normalizeMethod(intent.method);
-  parseHttpUrl(intent.url);
-  if (!matchesPeer(intent.url, identity.peers)) {
-    throw new SealError("forbidden", "identity is not bound to that peer");
-  }
-
-  const userApproved = await resolveApproval(state, identity, {
+  const bound = bindHttp(state, intent.identity, intent.method, intent.url);
+  await authorizeUse(state, bound.identity, {
     op: "http",
-    identity: identity.name,
-    detail: `${method} ${intent.url}`,
-  });
-  authorizeUse(state, {
-    action: "Http",
-    identity: identity.name,
-    context: { url: intent.url, method, userApproved },
+    identity: bound.identity.name,
+    method: bound.method,
+    url: bound.url,
   });
 
   const headers = sanitizeAgentHeaders(intent.headers);
@@ -263,11 +211,11 @@ async function performHttp(
     state.store,
     state.grantId,
     state.secretKey,
-    identity.secret,
+    bound.identity.secret,
     (secret) =>
       fetchPeer(
-        { method, url: intent.url, body: intent.body },
-        attachBearer(identity, headers, secret),
+        { method: bound.method, url: bound.url, body: intent.body },
+        attachBearer(bound.identity, headers, secret),
         state.fetch,
       ),
   );
@@ -278,184 +226,174 @@ async function performSign(
   state: SessionState,
   intent: SignIntent,
 ): Promise<Record<string, unknown>> {
-  const identity = requireIdentity(state, intent.identity);
-  if (!formatMatches(identity.attach, intent.format)) {
-    throw new SealError(
-      "unsupported_op",
-      "identity cannot sign with that format",
-    );
-  }
-
-  const userApproved = await resolveApproval(state, identity, {
+  const bound = bindSign(state, intent.identity, intent.format);
+  await authorizeUse(state, bound.identity, {
     op: "sign",
-    identity: identity.name,
-    detail: `${intent.format} ${truncate(intent.payload)}`,
-  });
-  authorizeUse(state, {
-    action: "Sign",
-    identity: identity.name,
-    context: { format: intent.format, userApproved },
+    identity: bound.identity.name,
+    format: bound.format,
+    payloadPreview: truncate(intent.payload),
   });
 
   const signature = withUnsealedSecret(
     state.store,
     state.grantId,
     state.secretKey,
-    identity.secret,
-    (secret) => signPayload(identity.attach, intent.payload, secret),
+    bound.identity.secret,
+    (secret) => signPayload(bound.identity.attach, intent.payload, secret),
   );
   return { ok: true, signature };
 }
 
-function authorizeUse(
-  state: SessionState,
-  request: {
-    action: "Http" | "Sign";
-    identity: string;
-    context: {
-      url?: string;
-      method?: string;
-      format?: string;
-      userApproved: boolean;
-    };
-  },
-): void {
-  if (!state.store.fetchGrant(state.grantId)) {
-    throw new SealError("grant_expired", "grant expired or revoked");
+function performCheck(state: SessionState, intent: CheckIntent): CheckResult {
+  if (intent.op === "http") {
+    const bound = bindHttp(
+      state,
+      intent.identity,
+      intent.method ?? "",
+      intent.url ?? "",
+    );
+    return decide(state, bound.identity, {
+      op: "http",
+      identity: bound.identity.name,
+      method: bound.method,
+      url: bound.url,
+    });
   }
-  const allowed = state.pdp.isAllowed({
-    sessionId: state.sessionId,
-    action: request.action,
-    identity: request.identity,
-    context: request.context,
+
+  const bound = bindSign(state, intent.identity, intent.format ?? "");
+  return decide(state, bound.identity, {
+    op: "sign",
+    identity: bound.identity.name,
+    format: bound.format,
   });
-  if (allowed) {
-    return;
-  }
-  if (
-    !request.context.userApproved &&
-    state.pdp.isAllowed({
-      sessionId: state.sessionId,
-      action: request.action,
-      identity: request.identity,
-      context: { ...request.context, userApproved: true },
-    })
-  ) {
-    throw new SealError("approval_required", "human approval required");
-  }
-  throw new SealError("forbidden", "denied by policy");
 }
 
-async function resolveApproval(
+function bindHttp(
+  state: SessionState,
+  identityName: string,
+  method: string,
+  url: string,
+): { identity: IdentityBinding; method: string; url: string } {
+  const identity = requireIdentity(state, identityName);
+  if (identity.attach.type !== "bearer") {
+    throw new SealError("unsupported_op", "identity cannot perform http");
+  }
+  const normalized = normalizeMethod(method);
+  parseHttpUrl(url);
+  if (!matchesPeer(url, identity.peers)) {
+    throw new SealError("forbidden", "identity is not bound to that peer");
+  }
+  return { identity, method: normalized, url };
+}
+
+function bindSign(
+  state: SessionState,
+  identityName: string,
+  format: string,
+): { identity: IdentityBinding; format: string } {
+  const identity = requireIdentity(state, identityName);
+  if (!formatMatches(identity.attach, format)) {
+    throw new SealError(
+      "unsupported_op",
+      "identity cannot sign with that format",
+    );
+  }
+  return { identity, format };
+}
+
+function decide(
   state: SessionState,
   identity: IdentityBinding,
   intent: PendingIntent,
-): Promise<boolean> {
+): CheckResult {
+  const outcome = policyOutcome(state, identity, intent);
+  if (outcome === "allow") {
+    return { allowed: true };
+  }
+  return { allowed: false, reason: outcome };
+}
+
+async function authorizeUse(
+  state: SessionState,
+  identity: IdentityBinding,
+  intent: PendingIntent,
+): Promise<void> {
+  const outcome = policyOutcome(state, identity, intent);
+  if (outcome === "allow") {
+    return;
+  }
+  if (outcome === "forbidden") {
+    throw new SealError("forbidden", "denied by policy");
+  }
+
   const mode = approvalMode(identity);
-  if (mode === "never") {
-    return false;
-  }
-  if (mode === "once" && state.unlocked.has(identity.name)) {
-    return true;
-  }
-
-  const needsPrompt =
-    !state.pdp.isAllowed({
-      sessionId: state.sessionId,
-      action: intent.op === "http" ? "Http" : "Sign",
-      identity: identity.name,
-      context: contextFromIntent(intent, false),
-    }) &&
-    state.pdp.isAllowed({
-      sessionId: state.sessionId,
-      action: intent.op === "http" ? "Http" : "Sign",
-      identity: identity.name,
-      context: contextFromIntent(intent, true),
-    });
-
-  if (!needsPrompt) {
-    return false;
-  }
-  if (!state.approve) {
-    return false;
+  if (mode === "never" || !state.approve) {
+    throw new SealError("approval_required", "human approval required");
   }
   const approved = await state.approve(intent);
-  if (approved && mode === "once") {
+  if (!approved) {
+    throw new SealError("approval_required", "human approval required");
+  }
+  if (mode === "once") {
     state.unlocked.add(identity.name);
   }
-  return approved;
 }
 
-function contextFromIntent(
+function policyOutcome(
+  state: SessionState,
+  identity: IdentityBinding,
   intent: PendingIntent,
-  userApproved: boolean,
-): {
-  url?: string;
-  method?: string;
-  format?: string;
-  userApproved: boolean;
-} {
-  if (intent.op === "http") {
-    const [method = "", ...rest] = intent.detail.split(" ");
-    return { method, url: rest.join(" "), userApproved };
+): "allow" | "approval_required" | "forbidden" {
+  if (!state.store.fetchGrant(state.grantId)) {
+    throw new SealError("grant_expired", "grant expired or revoked");
   }
-  const [format = ""] = intent.detail.split(" ");
-  return { format, userApproved };
+
+  const action = intent.op === "http" ? "Http" : "Sign";
+  const context =
+    intent.op === "http"
+      ? { url: intent.url ?? "", method: intent.method ?? "" }
+      : { format: intent.format ?? "" };
+  const unlocked =
+    approvalMode(identity) === "once" && state.unlocked.has(identity.name);
+
+  if (
+    state.pdp.isAllowed({
+      sessionId: state.sessionId,
+      action,
+      identity: identity.name,
+      context: { ...context, userApproved: unlocked },
+    })
+  ) {
+    return "allow";
+  }
+  if (
+    state.pdp.isAllowed({
+      sessionId: state.sessionId,
+      action,
+      identity: identity.name,
+      context: { ...context, userApproved: true },
+    })
+  ) {
+    return "approval_required";
+  }
+  return "forbidden";
 }
 
-function capabilities(state: SessionState): Record<string, unknown> {
+function capabilities(state: SessionState): SessionCapabilities {
   const identities = [...state.identities.values()].map((identity) => {
-    const ops: string[] = [];
-    if (identity.attach.type === "bearer") {
-      const allowed = (identity.peers ?? []).some((peer) =>
-        httpProbes(peer).some(
-          (url) =>
-            state.pdp.isAllowed({
-              sessionId: state.sessionId,
-              action: "Http",
-              identity: identity.name,
-              context: { url, method: "GET", userApproved: false },
-            }) ||
-            state.pdp.isAllowed({
-              sessionId: state.sessionId,
-              action: "Http",
-              identity: identity.name,
-              context: { url, method: "GET", userApproved: true },
-            }),
-        ),
-      );
-      if (allowed) {
-        ops.push("http");
-      }
-    } else if (
-      state.pdp.isAllowed({
-        sessionId: state.sessionId,
-        action: "Sign",
-        identity: identity.name,
-        context: {
-          format: identity.attach.type,
-          userApproved: true,
-        },
-      })
-    ) {
-      ops.push("sign");
-    }
-
+    const http = identity.attach.type === "bearer";
     return {
       name: identity.name,
-      ops,
+      ops: http ? ["http"] : ["sign"],
       approve: approvalMode(identity),
       ...(identity.peers ? { peers: identity.peers } : {}),
-      ...(identity.attach.type !== "bearer"
-        ? { formats: [identity.attach.type] }
-        : {}),
+      ...(!http ? { formats: [identity.attach.type] } : {}),
     };
   });
 
   return {
-    ok: true,
     session: state.sessionId,
-    ops: ["http", "sign"],
+    ops: [...new Set(identities.flatMap((identity) => identity.ops))],
     identities,
     openapi: "/v1/openapi.json",
   };
@@ -490,9 +428,7 @@ function parseHttpIntent(raw: unknown): HttpIntent {
       "request must be { identity, method, url }",
     );
   }
-  if ("value" in raw) {
-    throw new SealError("bad_request", "credential disclosure is not allowed");
-  }
+  refuseDisclosure(raw);
   const headers = isRecord(raw.headers)
     ? Object.fromEntries(
         Object.entries(raw.headers).filter(
@@ -521,14 +457,42 @@ function parseSignIntent(raw: unknown): SignIntent {
       "request must be { identity, payload, format }",
     );
   }
-  if ("value" in raw) {
-    throw new SealError("bad_request", "credential disclosure is not allowed");
-  }
+  refuseDisclosure(raw);
   return {
     identity: raw.identity,
     payload: raw.payload,
     format: raw.format,
   };
+}
+
+function parseCheckIntent(raw: unknown): CheckIntent {
+  if (
+    !isRecord(raw) ||
+    (raw.op !== "http" && raw.op !== "sign") ||
+    typeof raw.identity !== "string"
+  ) {
+    throw new SealError("bad_request", "request must be { op, identity }");
+  }
+  refuseDisclosure(raw);
+  if (raw.op === "http") {
+    return {
+      op: "http",
+      identity: raw.identity,
+      ...(typeof raw.method === "string" ? { method: raw.method } : {}),
+      ...(typeof raw.url === "string" ? { url: raw.url } : {}),
+    };
+  }
+  return {
+    op: "sign",
+    identity: raw.identity,
+    ...(typeof raw.format === "string" ? { format: raw.format } : {}),
+  };
+}
+
+function refuseDisclosure(raw: Record<string, unknown>): void {
+  if ("value" in raw) {
+    throw new SealError("bad_request", "credential disclosure is not allowed");
+  }
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -553,7 +517,9 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-function listenLoopback(server: Server): Promise<{ url: string }> {
+function listenLoopback(
+  server: ReturnType<typeof createServer>,
+): Promise<{ url: string }> {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
@@ -630,22 +596,6 @@ function statusFor(code: ErrorCode): number {
   }
 }
 
-function httpProbes(peer: string): string[] {
-  const base = peer.endsWith("/") ? peer.slice(0, -1) : peer;
-  return [
-    peer,
-    `${base}/`,
-    `${base}/repos/probe`,
-    `${base}/repos/acme/seal/issues`,
-    `${base}/repos/philippschroeppel/seal/issues`,
-    `${base}/user`,
-  ];
-}
-
 function truncate(value: string): string {
   return value.length <= 64 ? value : `${value.slice(0, 61)}...`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

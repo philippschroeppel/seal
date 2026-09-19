@@ -174,13 +174,7 @@ export function normalizeMethod(method: string): string {
 }
 
 export function formatMatches(attach: IdentityAttach, format: string): boolean {
-  if (attach.type === "hmac-sha256") {
-    return format === "hmac-sha256";
-  }
-  if (attach.type === "ed25519") {
-    return format === "ed25519" || format === "ssh";
-  }
-  return false;
+  return attach.type === format && attach.type !== "bearer";
 }
 
 export async function fetchPeer(

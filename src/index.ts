@@ -2,27 +2,26 @@ export type {
   AgentSession,
   AgentSessionOptions,
   Approver,
-  HttpIntent,
-  PendingIntent,
   RunManifestOptions,
-  SignIntent,
 } from "./agent.js";
 export { runWithManifest, startAgentSession } from "./agent.js";
 export type {
   AgentConnection,
-  HttpRequest,
   HttpResponse,
-  SessionCapabilities,
-  SignRequest,
   SignResponse,
 } from "./agent-client.js";
 export { agent } from "./agent-client.js";
-export type { Broker, BrokerOptions, RunOptions, RunResult } from "./broker.js";
-export { runWithGrant, startBroker } from "./broker.js";
-export { wipe } from "./bytes.js";
-export { getSecret } from "./client.js";
 export type { ErrorCode } from "./errors.js";
 export { isSealError, SealError } from "./errors.js";
+export type {
+  CheckIntent,
+  CheckResult,
+  HttpIntent,
+  PendingIntent,
+  SessionCapabilities,
+  SignIntent,
+} from "./intents.js";
+export { formatPendingIntent } from "./intents.js";
 export type {
   ApprovalMode,
   IdentityAttach,
@@ -30,21 +29,15 @@ export type {
   Manifest,
   SecretSource,
 } from "./manifest.js";
-export {
-  loadManifestFile,
-  parseManifest,
-  storeFromManifest,
-} from "./manifest.js";
-export { ENV } from "./protocol.js";
+export { loadManifestFile, storeFromManifest } from "./manifest.js";
+export type { PluginContract, PluginIdentityNeed } from "./plugin.js";
+export { assertCompatible } from "./plugin.js";
 export { SEAL_SCHEMA } from "./schema.js";
-export { generateKeyPair, seal, unseal } from "./seal.js";
-export { decryptValue, MemorySecretStore } from "./store.js";
+export { MemorySecretStore } from "./store.js";
 export type {
-  ClientConnection,
   Grant,
   GrantEntry,
   GrantId,
-  KeyPair,
   SecretName,
   SecretStore,
   SessionToken,

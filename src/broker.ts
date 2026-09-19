@@ -1,12 +1,9 @@
-import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, unlinkSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bytesToHex, randomBytes } from "@noble/ciphers/utils.js";
-import { wipe } from "./bytes.js";
 import { type RunResult, type SpawnOptions, spawnChild } from "./child.js";
-import type { ErrorCode } from "./errors.js";
+import { type ErrorCode, SealError } from "./errors.js";
 import {
   createLineReader,
   type DecryptResponse,
@@ -14,14 +11,14 @@ import {
   encodeLine,
   parseDecryptRequest,
 } from "./protocol.js";
-import { generateKeyPair, unseal } from "./seal.js";
-import { decryptValue } from "./store.js";
+import { openGrantLease } from "./session.js";
 import type {
   ClientConnection,
   SecretName,
   SecretStore,
   SessionToken,
 } from "./types.js";
+import { withUnsealedSecret } from "./use.js";
 
 export interface BrokerOptions {
   readonly store: SecretStore;
@@ -42,20 +39,8 @@ export type { RunResult };
  * recipient secret key when the TTL elapses or `close()` is called.
  */
 export async function startBroker(options: BrokerOptions): Promise<Broker> {
-  const { store, secretNames, ttlMs } = options;
-  if (secretNames.length === 0) {
-    throw new Error("secretNames must not be empty");
-  }
-  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
-    throw new Error("ttlMs must be a positive number");
-  }
-
-  const grantId = randomUUID();
-  const token: SessionToken = bytesToHex(randomBytes(16));
-  const { publicKey, secretKey } = generateKeyPair();
-  store.issueGrant(grantId, secretNames, publicKey, ttlMs);
-
-  const socketPath = join(tmpdir(), `seal-${grantId}.sock`);
+  const lease = openGrantLease(options);
+  const socketPath = join(tmpdir(), `seal-${lease.grantId}.sock`);
   if (existsSync(socketPath)) {
     unlinkSync(socketPath);
   }
@@ -69,7 +54,15 @@ export async function startBroker(options: BrokerOptions): Promise<Broker> {
       "data",
       createLineReader((line) => {
         conn.write(
-          encodeLine(handleRequest(line, token, grantId, store, secretKey)),
+          encodeLine(
+            handleRequest(
+              line,
+              lease.token,
+              lease.grantId,
+              options.store,
+              lease.secretKey,
+            ),
+          ),
         );
       }),
     );
@@ -77,33 +70,20 @@ export async function startBroker(options: BrokerOptions): Promise<Broker> {
 
   await listenUnix(server, socketPath);
 
-  const expire = () => {
-    store.revokeGrant(grantId);
-    wipe(secretKey);
+  return {
+    socketPath,
+    token: lease.token,
+    close: () =>
+      lease.close(() => {
+        for (const socket of sockets) {
+          socket.destroy();
+        }
+        server.close();
+        if (existsSync(socketPath)) {
+          unlinkSync(socketPath);
+        }
+      }),
   };
-
-  let closed = false;
-  const close = () => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    clearTimeout(ttlTimer);
-    expire();
-    for (const socket of sockets) {
-      socket.destroy();
-    }
-    server.close();
-    if (existsSync(socketPath)) {
-      unlinkSync(socketPath);
-    }
-  };
-
-  // Revoke and drop the unsealing key at TTL, but keep the socket so a
-  // still-running child gets a typed `grant_expired` instead of ENOENT.
-  const ttlTimer = setTimeout(expire, ttlMs);
-
-  return { socketPath, token, close };
 }
 
 export async function runWithGrant(options: RunOptions): Promise<RunResult> {
@@ -136,24 +116,23 @@ function handleRequest(
     return fail("unauthorized", "unauthorized");
   }
 
-  const grant = store.fetchGrant(grantId);
-  if (!grant) {
-    return fail("grant_expired", "grant expired or revoked");
-  }
-
-  const entry = grant.entries.find((item) => item.name === request.name);
-  if (!entry) {
-    return fail("not_granted", "not granted");
-  }
-
   try {
-    const dek = unseal(entry.wrappedDek, secretKey);
-    try {
-      return { ok: true, value: decryptValue(entry, dek) };
-    } finally {
-      wipe(dek);
+    return {
+      ok: true,
+      value: withUnsealedSecret(
+        store,
+        grantId,
+        secretKey,
+        request.name,
+        (value) => value,
+      ),
+    };
+  } catch (error) {
+    if (error instanceof SealError) {
+      if (error.code === "grant_expired" || error.code === "not_granted") {
+        return fail(error.code, error.message);
+      }
     }
-  } catch {
     return fail("decrypt_failed", "failed to decrypt secret");
   }
 }

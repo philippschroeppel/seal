@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { SealError } from "./errors.js";
 import { MemorySecretStore } from "./store.js";
-import type { SecretName } from "./types.js";
+import { isRecord, type SecretName } from "./types.js";
 
 export type ApprovalMode = "never" | "once" | "each";
 
@@ -34,15 +34,7 @@ export interface Manifest {
   readonly sessionId?: string;
   readonly ttlMs: number;
   readonly policies: string;
-  readonly schema?: string;
   readonly identities: readonly IdentityBinding[];
-}
-
-interface ManifestFile {
-  readonly session?: { readonly id?: string; readonly ttlMs?: number };
-  readonly policies: string;
-  readonly schema?: string;
-  readonly identities: readonly unknown[];
 }
 
 const DEFAULT_TTL_MS = 5 * 60_000;
@@ -60,13 +52,6 @@ export function loadManifestFile(path: string): Manifest {
     ? raw.policies
     : readFileSync(resolve(dirname(path), raw.policies), "utf8");
 
-  const schema =
-    typeof raw.schema === "string" && !looksLikeSchema(raw.schema)
-      ? readFileSync(resolve(dirname(path), raw.schema), "utf8")
-      : typeof raw.schema === "string"
-        ? raw.schema
-        : undefined;
-
   const session = isRecord(raw.session) ? raw.session : undefined;
 
   return {
@@ -76,26 +61,7 @@ export function loadManifestFile(path: string): Manifest {
         ? session.ttlMs
         : DEFAULT_TTL_MS,
     policies,
-    ...(schema === undefined ? {} : { schema }),
     identities: raw.identities.map((item, index) => parseIdentity(item, index)),
-  };
-}
-
-export function parseManifest(input: ManifestFile | Manifest): Manifest {
-  if ("ttlMs" in input && typeof input.ttlMs === "number") {
-    return input;
-  }
-  const file = input as ManifestFile;
-  return {
-    ...(typeof file.session?.id === "string"
-      ? { sessionId: file.session.id }
-      : {}),
-    ttlMs: file.session?.ttlMs ?? DEFAULT_TTL_MS,
-    policies: file.policies,
-    ...(file.schema === undefined ? {} : { schema: file.schema }),
-    identities: file.identities.map((item, index) =>
-      parseIdentity(item, index),
-    ),
   };
 }
 
@@ -121,10 +87,6 @@ export function approvalMode(identity: IdentityBinding): ApprovalMode {
     return identity.approve;
   }
   return identity.attach.type === "bearer" ? "never" : "each";
-}
-
-export function secretNameOf(identity: IdentityBinding): SecretName {
-  return identity.secret;
 }
 
 function parseIdentity(raw: unknown, index: number): IdentityBinding {
@@ -219,12 +181,4 @@ function readSecret(
 
 function looksLikeCedar(value: string): boolean {
   return /\b(permit|forbid)\s*\(/.test(value);
-}
-
-function looksLikeSchema(value: string): boolean {
-  return /\bnamespace\s+\w+/.test(value) || /\bentity\s+\w+/.test(value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

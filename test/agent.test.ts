@@ -120,6 +120,75 @@ describe("agent session", () => {
     };
     expect(spec.paths["/v1/http"]).toBeDefined();
     expect(spec.paths["/v1/sign"]).toBeDefined();
+    expect(spec.paths["/v1/check"]).toBeDefined();
+  });
+
+  it("lists http from attach type without GitHub URL probes", async () => {
+    const store = new MemorySecretStore();
+    store.put("stripe", "sk_test");
+    const session = await startAgentSession({
+      store,
+      manifest: {
+        ttlMs: 5_000,
+        policies: `permit (principal, action, resource);`,
+        identities: [
+          {
+            name: "stripe",
+            secret: "stripe",
+            attach: { type: "bearer" },
+            peers: ["https://api.stripe.com/"],
+          },
+        ],
+      },
+    });
+    sessions.push(session);
+
+    const caps = await agent.capabilities(session);
+    expect(caps.identities).toEqual([
+      expect.objectContaining({
+        name: "stripe",
+        ops: ["http"],
+        peers: ["https://api.stripe.com/"],
+      }),
+    ]);
+  });
+
+  it("checks an intent against Cedar without unsealing", async () => {
+    const peer = await openPeer();
+    const session = await openSession(peer.url);
+
+    await expect(
+      agent.check(
+        {
+          op: "http",
+          identity: "gh-token",
+          method: "GET",
+          url: `${peer.url}/repos/acme/seal/issues`,
+        },
+        session,
+      ),
+    ).resolves.toEqual({ allowed: true });
+
+    await expect(
+      agent.check(
+        {
+          op: "http",
+          identity: "gh-token",
+          method: "GET",
+          url: `${peer.url}/user/keys`,
+        },
+        session,
+      ),
+    ).resolves.toEqual({ allowed: false, reason: "forbidden" });
+
+    await expect(
+      agent.check(
+        { op: "sign", identity: "me-sign", format: "hmac-sha256" },
+        session,
+      ),
+    ).resolves.toEqual({ allowed: false, reason: "approval_required" });
+
+    expect(peer.seen).toHaveLength(0);
   });
 
   it("rejects a request with the wrong token and after TTL", async () => {
@@ -265,6 +334,7 @@ permit (
       {
         name: "gh-token",
         secret: "gh-token",
+        source: { env: "GITHUB_TOKEN" },
         attach: { type: "bearer" },
         peers: [peerUrl],
       },
