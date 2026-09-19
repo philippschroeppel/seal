@@ -1,6 +1,6 @@
 import {
-  agent,
   type AgentConnection,
+  agent,
   type PluginContract,
 } from "../src/index.js";
 
@@ -47,7 +47,11 @@ export function createPullRequest(
   body: { title: string; head: string; base: string; body?: string },
   connection?: AgentConnection,
 ): Promise<{ status: number; body: string }> {
-  return githubRequest(`/repos/${repo}/pulls`, { method: "POST", body }, connection);
+  return githubRequest(
+    `/repos/${repo}/pulls`,
+    { method: "POST", body },
+    connection,
+  );
 }
 
 export function signCommit(

@@ -76,7 +76,9 @@ export const OPENAPI_DOCUMENT = {
         },
         responses: {
           "200": { description: "allowed, or reason without key material" },
-          "403": { description: "Identity cannot perform that op or peer bind failed" },
+          "403": {
+            description: "Identity cannot perform that op or peer bind failed",
+          },
         },
       },
     },

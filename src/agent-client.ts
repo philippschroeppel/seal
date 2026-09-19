@@ -141,7 +141,9 @@ export function getCapabilities(
           return [
             {
               name: item.name,
-              ops: item.ops.filter((op): op is string => typeof op === "string"),
+              ops: item.ops.filter(
+                (op): op is string => typeof op === "string",
+              ),
               approve: item.approve,
               ...(Array.isArray(item.peers)
                 ? {

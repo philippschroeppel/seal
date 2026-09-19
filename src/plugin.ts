@@ -1,5 +1,5 @@
-import type { CapabilityIdentity, SessionCapabilities } from "./intents.js";
 import { SealError } from "./errors.js";
+import type { CapabilityIdentity, SessionCapabilities } from "./intents.js";
 import { urlMatchesPrefix } from "./use.js";
 
 export interface PluginIdentityNeed {
@@ -28,7 +28,9 @@ export function assertCompatible(
   capabilities: SessionCapabilities,
 ): void {
   for (const need of plugin.identities) {
-    const have = capabilities.identities.find((item) => item.name === need.name);
+    const have = capabilities.identities.find(
+      (item) => item.name === need.name,
+    );
     if (!have) {
       throw new SealError(
         "not_granted",

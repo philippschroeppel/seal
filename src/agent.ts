@@ -1,4 +1,8 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import type { RunResult, SpawnOptions } from "./child.js";
 import { spawnChild } from "./child.js";
 import { type ErrorCode, SealError } from "./errors.js";
@@ -91,7 +95,8 @@ export async function startAgentSession(
     secretNames: options.manifest.identities.map((identity) => identity.secret),
     ttlMs,
   });
-  const sessionId = options.sessionId ?? options.manifest.sessionId ?? lease.grantId;
+  const sessionId =
+    options.sessionId ?? options.manifest.sessionId ?? lease.grantId;
 
   const pdp = await createCedarPdp({
     policies: options.manifest.policies,

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  createPullRequest,
+  githubPlugin,
+  signCommit,
+} from "../examples/github-plugin.js";
+import {
   type AgentSession,
   agent,
   assertCompatible,
@@ -8,11 +13,6 @@ import {
   type SessionCapabilities,
   startAgentSession,
 } from "../src/index.js";
-import {
-  createPullRequest,
-  githubPlugin,
-  signCommit,
-} from "../examples/github-plugin.js";
 
 const TOKEN = "secret-pat-do-not-leak";
 const SIGNING_KEY = "unit-test-hmac-key";

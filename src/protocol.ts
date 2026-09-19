@@ -65,4 +65,3 @@ export function parseDecryptResponse(line: string): DecryptResponse {
   }
   return { ok: false, error: raw.error as ErrorCode, message: raw.message };
 }
-
