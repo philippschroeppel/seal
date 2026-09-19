@@ -1,0 +1,47 @@
+{
+  "name": "seal",
+  "version": "0.1.0",
+  "description": "Grant a child process temporary, precise access to a subset of secrets without giving it a decryption key.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "demo": "node --import tsx src/demo.ts",
+    "demo:dist": "node dist/demo.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [
+    "secrets",
+    "sealed-box",
+    "x25519",
+    "broker"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.3.0",
+    "@noble/hashes": "^2.0.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.4",
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.9"
+  }
+}
