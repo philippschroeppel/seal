@@ -4,6 +4,7 @@
     "includes": [
       "src/**",
       "test/**",
+      "examples/**/*.ts",
       "package.json",
       "tsconfig.json",
       "tsconfig.build.json",

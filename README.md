@@ -2,13 +2,51 @@
 
 A small TypeScript library that lets a parent process grant a child **temporary, named access** to secrets — without ever handing the child a decryption key.
 
-The parent holds the unsealing key and serves plaintext over a local Unix socket. The grant is a subset of secrets, a TTL, and a bearer token. When the TTL elapses the key is wiped and further requests fail.
+There are two child surfaces:
 
-This is an architecture demo, not a production secret manager.
+1. **Cooperating programs** may call `getSecret(name)` over a Unix socket and receive plaintext.
+2. **Agent sessions** may only call loopback HTTP (`POST /v1/http`, `POST /v1/sign`). Seal performs the use after Cedar allows it. The agent never receives credential bytes.
 
-The product direction (use-not-read HTTP API, agent plugins, Cedar) is in [`docs/handoff.md`](docs/handoff.md).
+The design constraints are in [`docs/handoff.md`](docs/handoff.md).
 
-## How it works
+## Agent session (use, not read)
+
+```
+agent  +  plugins          untrusted, speak HTTP only
+        │
+        ▼
+Seal HTTP server           the only child surface
+        │
+        ▼
+Cedar (PDP)                permit / forbid
+        │
+        ▼
+Seal (PEP)                 on Allow: unseal, use identity, wipe
+                           on Deny:  403, no key material
+```
+
+```bash
+seal --manifest examples/agent/manifest.json -- agent
+```
+
+Seal starts an authorized loopback server, injects `SEAL_URL` and `SEAL_TOKEN` only, spawns the child, and tears down on exit. A plugin talks to Seal, not to GitHub with a raw token:
+
+```ts
+import { agent } from "seal";
+
+export async function createPullRequest(repo: string, body: unknown) {
+  return agent.http({
+    identity: "gh-token",
+    method: "POST",
+    url: `https://api.github.com/repos/${repo}/pulls`,
+    body,
+  });
+}
+```
+
+`GET /v1/capabilities` (and `/v1/openapi.json`) describe what the session may do. Those answers are probed from the same Cedar policies that gate each call. There is no `GET /secrets`.
+
+## How the kernel works
 
 ```
 ┌──────────────────── parent ────────────────────┐
@@ -18,36 +56,29 @@ The product direction (use-not-read HTTP API, agent plugins, Cedar) is in [`docs
 │  grant: wrap each DEK to the broker's X25519   │
 │         public key (sealed box)                │
 │                                                │
-│  Unix socket  ◄── { token, name }              │
-│    1. check token + grant + name               │
+│  Unix socket  ◄── { token, name }  (scripts)   │
+│  loopback HTTP◄── /v1/http, /v1/sign (agents)  │
+│    1. check token + grant + Cedar              │
 │    2. unseal DEK with broker secret key        │
-│    3. decrypt value, wipe DEK, return plaintext│
+│    3. use the value, wipe DEK                  │
 └────────────────────────────────────────────────┘
-         ▲
-         │ SEAL_SOCK + SEAL_TOKEN
-         │
-    cooperating child
-    getSecret("db/password")
 ```
 
 A sealed box is ephemeral X25519 + HKDF-SHA-256 + ChaCha20-Poly1305. The child never sees a DEK or the broker key.
 
 ## Decisions
 
-The draft was a single file. A few choices were settled so the split could stay small:
-
 | Choice | Default |
 | --- | --- |
 | Shape | One package, a few modules — not a monorepo |
-| Store | `SecretStore` interface + in-memory stand-in (the DEK would live in a KMS in production) |
-| Public API | `startBroker` / `runWithGrant` for the parent, `getSecret` for the child |
-| Wire format | Line-delimited JSON with `{ ok: true, value }` / `{ ok: false, error, message }` |
-| Env names | `SEAL_SOCK`, `SEAL_TOKEN` |
+| Store | `SecretStore` interface + in-memory stand-in |
+| Agent API | `startAgentSession` / `runWithManifest` + `agent.http` / `agent.sign` |
+| Script API | `startBroker` / `runWithGrant` + `getSecret` |
+| Policy | Cedar via `@cedar-policy/cedar-wasm` (one `isAuthorized` before unseal) |
+| Manifest | JSON identity bindings + a `.cedar` file (Cedar does not store key paths) |
+| Env names | `SEAL_URL` + `SEAL_TOKEN` for agents; `SEAL_SOCK` + `SEAL_TOKEN` for scripts |
 | Crypto | Noble v2 throughout, including AES-GCM for payloads |
-| TTL | Revoke + wipe the key; leave the socket up so the child gets `grant_expired` |
 | Tooling | ESM, TypeScript `NodeNext`, Node 20.19+, Vitest, Biome, `tsx` |
-
-Those are easy to change if you want a different split (separate client package, a real backend, etc.).
 
 ## Quick start
 
@@ -55,11 +86,30 @@ Those are easy to change if you want a different split (separate client package,
 npm install
 npm test
 npm run demo
+npm run demo:agent
 ```
 
-The demo grants `db/password` for two seconds, denies `db/root-password`, then shows the TTL taking effect.
+`demo` grants `db/password` for two seconds over the Unix socket. `demo:agent` starts a mock peer and shows HTTP use, a Cedar deny, a detached `getSecret`, and an approved signature.
 
 ## Library usage
+
+Agent session:
+
+```ts
+import { agent, MemorySecretStore, runWithManifest } from "seal";
+
+const store = new MemorySecretStore();
+store.put("gh-token", process.env.GITHUB_TOKEN ?? "");
+
+await runWithManifest({
+  store,
+  manifest,
+  command: process.execPath,
+  args: ["agent.js"],
+});
+```
+
+Cooperating script (plaintext, on purpose):
 
 ```ts
 import { MemorySecretStore, runWithGrant, getSecret } from "seal";
@@ -76,15 +126,7 @@ await runWithGrant({
 });
 ```
 
-In the child:
-
-```ts
-import { getSecret } from "seal";
-
-const password = await getSecret("db/password");
-```
-
-`startBroker` is the same grant + socket without spawning, which is what the tests use.
+`startAgentSession` and `startBroker` are the same grants without spawning.
 
 ## Module map
 
@@ -93,24 +135,30 @@ const password = await getSecret("db/password");
 | `src/seal.ts` | Sealed-box wrap / unwrap |
 | `src/store.ts` | Encrypt-at-rest + grants |
 | `src/broker.ts` | Unix socket, TTL, child spawn |
-| `src/client.ts` | What a cooperating child calls |
-| `src/protocol.ts` | Shared request / response types |
-| `src/demo.ts` | End-to-end walkthrough |
+| `src/agent.ts` | Loopback HTTP session, Cedar gate, use-not-read |
+| `src/pdp.ts` | Cedar WASM PDP |
+| `src/client.ts` / `src/agent-client.ts` | What a child calls |
+| `src/cli.ts` | `seal --manifest … -- <cmd>` |
+| `src/demo.ts` / `src/demo-agent.ts` | End-to-end walkthroughs |
+| `examples/github-plugin.ts` | Unprivileged GitHub glue |
 
 ## Scripts
 
 | Script | What it does |
 | --- | --- |
-| `npm test` | Unit + broker tests |
-| `npm run demo` | Run the walkthrough |
+| `npm test` | Unit + broker + agent tests |
+| `npm run demo` | Unix-socket walkthrough |
+| `npm run demo:agent` | Use-not-read walkthrough |
 | `npm run build` | Emit `dist/` |
 | `npm run lint` | Biome |
 | `npm run typecheck` | `tsc --noEmit` |
 
 ## Security notes
 
-- The child receives **plaintext** for names it was granted. Isolation is “this process, these names, this long” — not “the child cannot see secrets.”
-- The bearer token is in the child’s environment. Anyone who can read that env or connect to the socket with the token can ask for granted names until expiry.
-- The socket is `0600` under `os.tmpdir()`.
-- `wipe()` is best-effort. JavaScript runtimes can copy bytes; this is not constant-time memory hygiene.
+- Agent sessions authorize **use**, not disclosure. A live `gh-token` can still push or create keys unless Cedar forbids those paths.
+- Peer prefixes on an identity are a second gate: `/v1/http` is refused unless the URL is bound to that identity.
+- The session token is in the child's environment. Anyone who can read that env can propose uses until expiry.
+- Child env is stripped of `SEAL_SOCK` and common token variables. This is not a network namespace.
+- `wipe()` is best-effort. JavaScript runtimes can copy bytes.
 - `MemorySecretStore` keeps DEKs in process memory for its lifetime. Treat it as a stand-in.
+- Response bodies are not redacted. Policy must know dangerous fields.

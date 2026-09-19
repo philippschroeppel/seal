@@ -1,0 +1,22 @@
+{
+  "session": {
+    "ttlMs": 300000
+  },
+  "policies": "./policies.cedar",
+  "identities": [
+    {
+      "name": "gh-token",
+      "secret": "gh-token",
+      "source": { "env": "GITHUB_TOKEN" },
+      "attach": { "type": "bearer", "header": "Authorization", "scheme": "Bearer" },
+      "peers": ["https://api.github.com/"]
+    },
+    {
+      "name": "me-sign",
+      "secret": "me-sign",
+      "source": { "env": "SEAL_SIGNING_KEY" },
+      "attach": { "type": "hmac-sha256" },
+      "approve": "each"
+    }
+  ]
+}
