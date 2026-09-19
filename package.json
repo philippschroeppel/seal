@@ -1,7 +1,7 @@
 {
   "name": "seal",
   "version": "0.1.0",
-  "description": "Grant a child process temporary, precise access to a subset of secrets without giving it a decryption key.",
+  "description": "Let an agent use identities without reading them: Seal performs HTTP and signing after Cedar allows it.",
   "type": "module",
   "engines": {
     "node": ">=20.19"
@@ -12,13 +12,18 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "seal": "./dist/cli.js"
+  },
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "demo": "node --import tsx src/demo.ts",
+    "demo:agent": "node --import tsx src/demo-agent.ts",
     "demo:dist": "node dist/demo.js",
+    "seal": "node --import tsx src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "biome check .",
@@ -29,10 +34,13 @@
     "secrets",
     "sealed-box",
     "x25519",
-    "broker"
+    "broker",
+    "cedar",
+    "agent"
   ],
   "license": "MIT",
   "dependencies": {
+    "@cedar-policy/cedar-wasm": "^4.13.0",
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^2.3.0",
     "@noble/hashes": "^2.0.1"

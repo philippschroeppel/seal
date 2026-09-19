@@ -7,6 +7,10 @@ export const errorCodes = [
   "decrypt_failed",
   "protocol",
   "unknown_secret",
+  "forbidden",
+  "approval_required",
+  "unsupported_op",
+  "peer_failed",
 ] as const;
 
 export type ErrorCode = (typeof errorCodes)[number];

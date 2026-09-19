@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, unlinkSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
@@ -6,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bytesToHex, randomBytes } from "@noble/ciphers/utils.js";
 import { wipe } from "./bytes.js";
+import { type RunResult, type SpawnOptions, spawnChild } from "./child.js";
 import type { ErrorCode } from "./errors.js";
 import {
   createLineReader,
@@ -33,18 +33,9 @@ export interface Broker extends ClientConnection {
   close(): void;
 }
 
-export interface RunOptions extends BrokerOptions {
-  readonly command: string;
-  readonly args?: readonly string[];
-  readonly env?: NodeJS.ProcessEnv;
-  readonly stdio?: "inherit" | "pipe";
-}
+export interface RunOptions extends BrokerOptions, SpawnOptions {}
 
-export interface RunResult {
-  readonly exitCode: number;
-  readonly stdout: string;
-  readonly stderr: string;
-}
+export type { RunResult };
 
 /**
  * Open a Unix socket that unwraps DEKs for one grant, then forgets the
@@ -118,7 +109,10 @@ export async function startBroker(options: BrokerOptions): Promise<Broker> {
 export async function runWithGrant(options: RunOptions): Promise<RunResult> {
   const broker = await startBroker(options);
   try {
-    return await spawnChild(options, broker);
+    return await spawnChild(options, {
+      [ENV.socket]: broker.socketPath,
+      [ENV.token]: broker.token,
+    });
   } finally {
     broker.close();
   }
@@ -182,37 +176,6 @@ function listenUnix(
       } catch (error) {
         reject(error);
       }
-    });
-  });
-}
-
-function spawnChild(
-  options: RunOptions,
-  broker: ClientConnection,
-): Promise<RunResult> {
-  const child = spawn(options.command, options.args ?? [], {
-    stdio: options.stdio ?? "inherit",
-    env: {
-      ...process.env,
-      ...options.env,
-      [ENV.socket]: broker.socketPath,
-      [ENV.token]: broker.token,
-    },
-  });
-
-  let stdout = "";
-  let stderr = "";
-  child.stdout?.on("data", (chunk: Buffer) => {
-    stdout += chunk.toString("utf8");
-  });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString("utf8");
-  });
-
-  return new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("exit", (code) => {
-      resolve({ exitCode: code ?? 1, stdout, stderr });
     });
   });
 }

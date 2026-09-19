@@ -5,6 +5,7 @@ import type { SecretName, SessionToken } from "./types.js";
 export const ENV = {
   socket: "SEAL_SOCK",
   token: "SEAL_TOKEN",
+  url: "SEAL_URL",
 } as const;
 
 export interface DecryptRequest {
