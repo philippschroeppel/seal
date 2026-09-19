@@ -6,6 +6,8 @@ The parent holds the unsealing key and serves plaintext over a local Unix socket
 
 This is an architecture demo, not a production secret manager.
 
+The product direction (use-not-read HTTP API, agent plugins, Cedar) is in [`docs/handoff.md`](docs/handoff.md).
+
 ## How it works
 
 ```
