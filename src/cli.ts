@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline/promises";
 import { type Approver, type PendingIntent, runWithManifest } from "./agent.js";
+import { formatPendingIntent } from "./intents.js";
 import { loadManifestFile, storeFromManifest } from "./manifest.js";
 
 interface CliArgs {
@@ -77,7 +78,7 @@ async function promptApprover(intent: PendingIntent): Promise<boolean> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const answer = await rl.question(
-      `Seal: approve ${intent.op} with ${intent.identity}?\n  ${intent.detail}\n[y/N] `,
+      `Seal: approve ${intent.op} with ${intent.identity}?\n  ${formatPendingIntent(intent)}\n[y/N] `,
     );
     return answer.trim().toLowerCase() === "y";
   } finally {

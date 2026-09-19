@@ -46,12 +46,11 @@ export async function loadCedar(): Promise<CedarBindings> {
 
 export async function createCedarPdp(options: {
   readonly policies: string;
-  readonly schema?: string;
   readonly identities: readonly string[];
   readonly sessionId: string;
 }): Promise<PolicyDecisionPoint> {
   const cedar = await loadCedar();
-  const schema = options.schema ?? SEAL_SCHEMA;
+  const schema = SEAL_SCHEMA;
   const policies = { staticPolicies: options.policies };
 
   const schemaParse = cedar.checkParseSchema(schema);

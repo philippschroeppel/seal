@@ -51,6 +51,37 @@ export const OPENAPI_DOCUMENT = {
         },
       },
     },
+    "/v1/check": {
+      post: {
+        summary:
+          "Ask the same Cedar decision as /v1/http or /v1/sign without unsealing",
+        security: [{ sessionToken: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["op", "identity"],
+                properties: {
+                  op: { type: "string", enum: ["http", "sign"] },
+                  identity: { type: "string" },
+                  method: { type: "string" },
+                  url: { type: "string" },
+                  format: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "allowed, or reason without key material" },
+          "403": {
+            description: "Identity cannot perform that op or peer bind failed",
+          },
+        },
+      },
+    },
     "/v1/sign": {
       post: {
         summary: "Seal signs a payload with a signing identity",

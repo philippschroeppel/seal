@@ -1,6 +1,6 @@
 # Seal — design handoff
 
-This is the working design for what Seal should become. The code on this branch is a **typed demo of the crypto/grant broker**, not the product below. Read this first if you are continuing the work; then read the current code as the kernel that still applies (store, sealed box, TTL, process wrap).
+This is the working design for Seal. The kernel (store, sealed box, TTL, process wrap, agent HTTP, Cedar) is implemented. Plugins stay unprivileged clients with a typed contract; they are never loaded into Seal.
 
 ## Origin
 
@@ -19,9 +19,9 @@ seal --manifest permissions.cedar -- agent
 
 Everything after `--` is the child. Seal starts an authorized local HTTP server, injects `SEAL_URL` and `SEAL_TOKEN`, spawns the agent, tears down on exit.
 
-## Problem with the current demo
+## Problem this product solves
 
-Today a cooperating child calls `getSecret(name)` and receives **plaintext**. That is the right API for a script. It is the wrong API for an LLM agent: once a value is in tool results, traces, or the next prompt, it is not a secret.
+A cooperating child may call `getSecret(name)` (`seal/script`) and receive **plaintext**. That is the right API for a script. It is the wrong API for an LLM agent: once a value is in tool results, traces, or the next prompt, it is not a secret.
 
 A grant should authorize **use**, not **disclosure**.
 
@@ -77,7 +77,8 @@ The child sees only loopback HTTP, authorized by the session token.
 
 | Endpoint | Role |
 | --- | --- |
-| `GET /v1/capabilities` | What this session may do (identities, peers, ops). Also serve OpenAPI. |
+| `GET /v1/capabilities` | Identity bindings (ops from attach type, peers, formats). Also serve OpenAPI. |
+| `POST /v1/check` | Same Cedar decision as `http` / `sign`, no unseal |
 | `POST /v1/http` | `{ identity, method, url, headers?, body? }` → Seal fetches, attaches creds, returns status/headers/body |
 | `POST /v1/sign` | `{ identity, payload, format }` → signature |
 
@@ -91,7 +92,7 @@ Refuse:
 
 ## Plugins
 
-A plugin is agent-side glue (skill, MCP server, OpenAPI client) that **only** calls Seal:
+A plugin is agent-side glue (skill, MCP server, OpenAPI client) that **only** calls Seal. Declare a `PluginContract` and `assertCompatible` against `GET /v1/capabilities` (bindings). Ask Cedar about a concrete intent with `POST /v1/check`. Seal never `import()`s plugin modules.
 
 ```ts
 export async function createPullRequest(repo, body) {
@@ -152,7 +153,7 @@ permit (
 };
 ```
 
-`GET /v1/capabilities` should be derived from the same policies, not a second schema.
+`GET /v1/capabilities` lists identity bindings (attach type, peers, formats). `POST /v1/check` runs the same Cedar decision as `/v1/http` or `/v1/sign` without unsealing. OpenAPI documents the two kernel ops; it is not a second policy language. The Cedar schema is frozen (`SEAL_SCHEMA`).
 
 Cedar does not replace: sealed box, listen/wipe/spawn, header binding, the prompt that sets `userApproved`, or talking to gpg/YubiKey.
 
@@ -178,28 +179,21 @@ Amazon Verified Permissions is the same language as a remote PDP. It is optional
 5. Each call: authenticate → Cedar → use or 403.
 6. On exit (and TTL): revoke, wipe, unlisten. Same story as `runWithGrant`.
 
-## What is already built (this branch)
+## What is already built
 
-Typed ESM package: `src/seal.ts` (X25519 + HKDF + ChaCha20-Poly1305), `src/store.ts` (AES-GCM at rest + grants), `src/broker.ts` (`startBroker` / `runWithGrant`), `src/client.ts` (`getSecret`), demo that grants `db/password` for 2s.
+- Kernel: sealed box, encrypt-at-rest store, shared grant lease, wipe-after-use.
+- Agent session: loopback HTTP, Cedar PDP (`SEAL_SCHEMA` only), `http` / `sign` / `check`, human approval context.
+- Script broker: `seal/script` (`getSecret` / Unix socket). Not on the default `seal` export.
+- Plugin contract: `PluginContract` + `assertCompatible`. Example: `examples/github-plugin.ts`.
+- CLI: `seal --manifest … -- <cmd>`.
 
-Reusable later: injectable `SecretStore`, grant TTL/revoke, wipe after use, process wrap, fail-closed fetch.
+How to read the current code: `src/schema.ts` → `src/use.ts` → `src/agent.ts` → `src/plugin.ts` → `src/agent-client.ts`. Script path: `src/script.ts` → `src/broker.ts`.
 
-To replace: `getSecret` as the agent API; Unix-socket JSON as the only protocol; “read these names” as the meaning of a grant.
+## Suggested next steps
 
-How to read the current code: `src/demo.ts` → `src/types.ts` → `src/seal.ts` → `src/store.ts` → `src/broker.ts` → `src/client.ts`. Skip `index.ts` until the end.
-
-## Suggested implementation order
-
-1. Keep the store/seal/broker kernel; add a loopback HTTP server next to (or instead of) the Unix decrypt RPC for agent sessions.
-2. `POST /v1/http` + `POST /v1/sign` with a **hard-coded allowlist** (no Cedar yet) so the use-not-read path is real.
-3. Plug Cedar WASM as the PDP; move the allowlist into `.cedar` + a small schema.
-4. `GET /v1/capabilities` / OpenAPI from that schema.
-5. CLI: `seal --manifest … -- <cmd>`.
-6. One example plugin (e.g. GitHub HTTP) that never calls `getSecret`.
-7. Human-approval context for `sign` (the original GPG story).
-8. Optional: ssh-agent **backend** inside Seal; still not exposed to the agent.
-
-Keep `getSecret` only for non-agent cooperating programs, or drop it from agent sessions entirely.
+1. Human-approval UX defaults (`each` vs session-unlock after one passphrase).
+2. Optional: ssh-agent **backend** inside Seal; still not exposed to the agent.
+3. A catalog of plugin contracts (docs / npm names), still never loaded into Seal.
 
 ## Decisions already locked
 
@@ -217,8 +211,8 @@ Keep `getSecret` only for non-agent cooperating programs, or drop it from agent 
 - **Approval default for signing:** `each` (true “not without me”) vs session-unlock after one passphrase?
 - **How far to confine the child:** env-only (cooperating) vs network namespace so all TCP goes through Seal?
 - **Identity sources:** files + passphrase first, then gpg-agent / 1Password / YubiKey as backends?
-- **Keep `getSecret` at all** for non-agent children?
-- **Manifest split:** Cedar-only vs Cedar + a small JSON file for “where is this key and how do we attach it?” (Cedar should not store key paths or binding templates if we can avoid it.)
+- **Keep `getSecret` at all** for non-agent children? (Today: yes, but only on `seal/script`.)
+- **Manifest split:** Cedar-only vs Cedar + a small JSON file for “where is this key and how do we attach it?” (Cedar should not store key paths or binding templates if we can avoid it. Current split: JSON bindings + `.cedar` against frozen `SEAL_SCHEMA`.)
 
 ## Out of scope / non-goals
 
