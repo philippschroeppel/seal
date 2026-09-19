@@ -31,10 +31,14 @@ async function runAsCli(): Promise<void> {
 
   const self = process.argv[1];
   if (!self) {
-    throw new Error("cannot re-invoke this program: process.argv[1] is missing");
+    throw new Error(
+      "cannot re-invoke this program: process.argv[1] is missing",
+    );
   }
 
-  console.log("[cli] granting the child process access to db/password for 2s...\n");
+  console.log(
+    "[cli] granting the child process access to db/password for 2s...\n",
+  );
 
   const { exitCode } = await runWithGrant({
     store,

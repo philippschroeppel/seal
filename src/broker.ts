@@ -1,21 +1,27 @@
-import { bytesToHex, randomBytes } from "@noble/ciphers/utils.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, unlinkSync, chmodSync } from "node:fs";
+import { chmodSync, existsSync, unlinkSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { bytesToHex, randomBytes } from "@noble/ciphers/utils.js";
 import { wipe } from "./bytes.js";
 import type { ErrorCode } from "./errors.js";
 import {
   createLineReader,
+  type DecryptResponse,
+  ENV,
   encodeLine,
   parseDecryptRequest,
-  type DecryptResponse,
 } from "./protocol.js";
 import { generateKeyPair, unseal } from "./seal.js";
 import { decryptValue } from "./store.js";
-import type { ClientConnection, SecretName, SecretStore, SessionToken } from "./types.js";
+import type {
+  ClientConnection,
+  SecretName,
+  SecretStore,
+  SessionToken,
+} from "./types.js";
 
 export interface BrokerOptions {
   readonly store: SecretStore;
@@ -54,7 +60,7 @@ export async function startBroker(options: BrokerOptions): Promise<Broker> {
   }
 
   const grantId = randomUUID();
-  const token = bytesToHex(randomBytes(16)) as SessionToken;
+  const token: SessionToken = bytesToHex(randomBytes(16));
   const { publicKey, secretKey } = generateKeyPair();
   store.issueGrant(grantId, secretNames, publicKey, ttlMs);
 
@@ -71,7 +77,9 @@ export async function startBroker(options: BrokerOptions): Promise<Broker> {
     conn.on(
       "data",
       createLineReader((line) => {
-        conn.write(encodeLine(handleRequest(line, token, grantId, store, secretKey)));
+        conn.write(
+          encodeLine(handleRequest(line, token, grantId, store, secretKey)),
+        );
       }),
     );
   });
@@ -160,7 +168,10 @@ function fail(error: ErrorCode, message: string): DecryptResponse {
   return { ok: false, error, message };
 }
 
-function listenUnix(server: ReturnType<typeof createServer>, socketPath: string): Promise<void> {
+function listenUnix(
+  server: ReturnType<typeof createServer>,
+  socketPath: string,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(socketPath, () => {
@@ -175,14 +186,17 @@ function listenUnix(server: ReturnType<typeof createServer>, socketPath: string)
   });
 }
 
-function spawnChild(options: RunOptions, broker: ClientConnection): Promise<RunResult> {
+function spawnChild(
+  options: RunOptions,
+  broker: ClientConnection,
+): Promise<RunResult> {
   const child = spawn(options.command, options.args ?? [], {
     stdio: options.stdio ?? "inherit",
     env: {
       ...process.env,
       ...options.env,
-      SEAL_SOCK: broker.socketPath,
-      SEAL_TOKEN: broker.token,
+      [ENV.socket]: broker.socketPath,
+      [ENV.token]: broker.token,
     },
   });
 

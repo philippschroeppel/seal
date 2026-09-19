@@ -22,7 +22,10 @@ export function generateKeyPair(): KeyPair {
  * Sealed box: ephemeral X25519 + HKDF-SHA-256 + ChaCha20-Poly1305.
  * Layout: ephemeral_public (32) || nonce (12) || ciphertext+tag.
  */
-export function seal(plaintext: Uint8Array, recipientPublicKey: Uint8Array): Uint8Array {
+export function seal(
+  plaintext: Uint8Array,
+  recipientPublicKey: Uint8Array,
+): Uint8Array {
   assertLength(recipientPublicKey, PUBLIC_KEY_LENGTH, "recipient public key");
   const ephemeral = generateKeyPair();
   try {
@@ -39,14 +42,20 @@ export function seal(plaintext: Uint8Array, recipientPublicKey: Uint8Array): Uin
   }
 }
 
-export function unseal(sealed: Uint8Array, recipientSecretKey: Uint8Array): Uint8Array {
+export function unseal(
+  sealed: Uint8Array,
+  recipientSecretKey: Uint8Array,
+): Uint8Array {
   assertLength(recipientSecretKey, PUBLIC_KEY_LENGTH, "recipient secret key");
   if (sealed.length < SEALED_OVERHEAD) {
     throw new Error("sealed box is too short");
   }
 
   const ephemeralPublic = sealed.subarray(0, PUBLIC_KEY_LENGTH);
-  const nonce = sealed.subarray(PUBLIC_KEY_LENGTH, PUBLIC_KEY_LENGTH + NONCE_LENGTH);
+  const nonce = sealed.subarray(
+    PUBLIC_KEY_LENGTH,
+    PUBLIC_KEY_LENGTH + NONCE_LENGTH,
+  );
   const ciphertext = sealed.subarray(PUBLIC_KEY_LENGTH + NONCE_LENGTH);
   const key = deriveSealKey(recipientSecretKey, ephemeralPublic);
   try {
@@ -56,7 +65,10 @@ export function unseal(sealed: Uint8Array, recipientSecretKey: Uint8Array): Uint
   }
 }
 
-function deriveSealKey(secretKey: Uint8Array, peerPublicKey: Uint8Array): Uint8Array {
+function deriveSealKey(
+  secretKey: Uint8Array,
+  peerPublicKey: Uint8Array,
+): Uint8Array {
   const shared = x25519.getSharedSecret(secretKey, peerPublicKey);
   try {
     return hkdf(sha256, shared, undefined, HKDF_INFO, KEY_LENGTH);
@@ -65,7 +77,11 @@ function deriveSealKey(secretKey: Uint8Array, peerPublicKey: Uint8Array): Uint8A
   }
 }
 
-function assertLength(bytes: Uint8Array, expected: number, label: string): void {
+function assertLength(
+  bytes: Uint8Array,
+  expected: number,
+  label: string,
+): void {
   if (bytes.length !== expected) {
     throw new Error(`${label} must be ${expected} bytes`);
   }

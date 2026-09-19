@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { startBroker, runWithGrant, type Broker } from "../src/broker.js";
+import { type Broker, runWithGrant, startBroker } from "../src/broker.js";
 import { getSecret } from "../src/client.js";
-import { SealError } from "../src/errors.js";
+import type { SealError } from "../src/errors.js";
 import { MemorySecretStore } from "../src/store.js";
 
 const probePath = fileURLToPath(new URL("./probe.ts", import.meta.url));
@@ -31,7 +31,9 @@ async function openBroker(ttlMs = 5_000): Promise<Broker> {
 describe("broker", () => {
   it("returns a granted secret and denies anything else", async () => {
     const broker = await openBroker();
-    await expect(getSecret("db/password", broker)).resolves.toBe("hunter2-but-actually-random");
+    await expect(getSecret("db/password", broker)).resolves.toBe(
+      "hunter2-but-actually-random",
+    );
     await expect(getSecret("db/root-password", broker)).rejects.toMatchObject({
       code: "not_granted",
     } satisfies Partial<SealError>);
@@ -40,7 +42,10 @@ describe("broker", () => {
   it("rejects a request with the wrong token", async () => {
     const broker = await openBroker();
     await expect(
-      getSecret("db/password", { socketPath: broker.socketPath, token: "nope" }),
+      getSecret("db/password", {
+        socketPath: broker.socketPath,
+        token: "nope",
+      }),
     ).rejects.toMatchObject({ code: "unauthorized" });
   });
 
@@ -70,6 +75,9 @@ describe("broker", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ ok: true, value: "from-child" });
+    expect(JSON.parse(result.stdout)).toEqual({
+      ok: true,
+      value: "from-child",
+    });
   });
 });

@@ -3,7 +3,13 @@ import { randomBytes } from "@noble/ciphers/utils.js";
 import { utf8Decode, utf8Encode, wipe } from "./bytes.js";
 import { SealError } from "./errors.js";
 import { seal } from "./seal.js";
-import type { Grant, GrantEntry, GrantId, SecretName, SecretStore } from "./types.js";
+import type {
+  Grant,
+  GrantEntry,
+  GrantId,
+  SecretName,
+  SecretStore,
+} from "./types.js";
 
 const DEK_LENGTH = 32;
 const NONCE_LENGTH = 12;

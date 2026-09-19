@@ -5,7 +5,9 @@ import { generateKeyPair, seal, unseal } from "../src/seal.js";
 describe("seal", () => {
   it("round-trips plaintext to the intended recipient", () => {
     const recipient = generateKeyPair();
-    const plaintext = new TextEncoder().encode("only the parent can unwrap this");
+    const plaintext = new TextEncoder().encode(
+      "only the parent can unwrap this",
+    );
     const boxed = seal(plaintext, recipient.publicKey);
     expect(unseal(boxed, recipient.secretKey)).toEqual(plaintext);
   });
@@ -19,13 +21,16 @@ describe("seal", () => {
 
   it("rejects a truncated or empty box", () => {
     const recipient = generateKeyPair();
-    expect(() => unseal(new Uint8Array(10), recipient.secretKey)).toThrow(/too short/);
+    expect(() => unseal(new Uint8Array(10), recipient.secretKey)).toThrow(
+      /too short/,
+    );
   });
 
   it("rejects a tampered ciphertext", () => {
     const recipient = generateKeyPair();
     const boxed = seal(new TextEncoder().encode("secret"), recipient.publicKey);
-    boxed[boxed.length - 1] ^= 0xff;
+    const last = boxed.length - 1;
+    boxed[last] = (boxed[last] ?? 0) ^ 0xff;
     expect(() => unseal(boxed, recipient.secretKey)).toThrow();
   });
 

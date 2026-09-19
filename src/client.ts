@@ -2,10 +2,10 @@ import { createConnection } from "node:net";
 import { SealError } from "./errors.js";
 import {
   createLineReader,
-  encodeLine,
-  ENV,
-  parseDecryptResponse,
   type DecryptRequest,
+  ENV,
+  encodeLine,
+  parseDecryptResponse,
 } from "./protocol.js";
 import type { ClientConnection, SecretName } from "./types.js";
 
@@ -13,12 +13,18 @@ import type { ClientConnection, SecretName } from "./types.js";
  * Ask the parent broker for one granted secret. A cooperating child calls
  * this; it never receives a DEK or the broker's unsealing key.
  */
-export function getSecret(name: SecretName, connection?: ClientConnection): Promise<string> {
+export function getSecret(
+  name: SecretName,
+  connection?: ClientConnection,
+): Promise<string> {
   const socketPath = connection?.socketPath ?? process.env[ENV.socket];
   const token = connection?.token ?? process.env[ENV.token];
   if (!socketPath || !token) {
     return Promise.reject(
-      new SealError("not_attached", "not running under seal (no socket/token in env)"),
+      new SealError(
+        "not_attached",
+        "not running under seal (no socket/token in env)",
+      ),
     );
   }
 
@@ -54,7 +60,12 @@ export function getSecret(name: SecretName, connection?: ClientConnection): Prom
             finish(new SealError(response.error, response.message));
           }
         } catch (error) {
-          finish(new SealError("protocol", error instanceof Error ? error.message : "bad response"));
+          finish(
+            new SealError(
+              "protocol",
+              error instanceof Error ? error.message : "bad response",
+            ),
+          );
         }
       }),
     );

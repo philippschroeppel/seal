@@ -13,7 +13,10 @@ try {
 } catch (error) {
   const payload = isSealError(error)
     ? { ok: false, error: error.code, message: error.message }
-    : { ok: false, message: error instanceof Error ? error.message : String(error) };
+    : {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
   process.stdout.write(`${JSON.stringify(payload)}\n`);
   process.exitCode = 1;
 }

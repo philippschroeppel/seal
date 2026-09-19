@@ -20,7 +20,9 @@ export function encodeLine(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
 
-export function createLineReader(onLine: (line: string) => void): (chunk: Buffer) => void {
+export function createLineReader(
+  onLine: (line: string) => void,
+): (chunk: Buffer) => void {
   let buffer = "";
   return (chunk: Buffer) => {
     buffer += chunk.toString("utf8");
@@ -36,7 +38,11 @@ export function createLineReader(onLine: (line: string) => void): (chunk: Buffer
 
 export function parseDecryptRequest(line: string): DecryptRequest {
   const raw: unknown = JSON.parse(line);
-  if (!isRecord(raw) || typeof raw.token !== "string" || typeof raw.name !== "string") {
+  if (
+    !isRecord(raw) ||
+    typeof raw.token !== "string" ||
+    typeof raw.name !== "string"
+  ) {
     throw new SyntaxError("request must be { token, name }");
   }
   return { token: raw.token, name: raw.name };

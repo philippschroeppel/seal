@@ -42,6 +42,8 @@ describe("MemorySecretStore", () => {
   it("fails closed on unknown secret names", () => {
     const store = new MemorySecretStore();
     const recipient = generateKeyPair();
-    expect(() => store.issueGrant("g1", ["missing"], recipient.publicKey, 1000)).toThrow(SealError);
+    expect(() =>
+      store.issueGrant("g1", ["missing"], recipient.publicKey, 1000),
+    ).toThrow(SealError);
   });
 });
