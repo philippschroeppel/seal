@@ -309,10 +309,7 @@ describe("agent session", () => {
 
 async function openSession(
   peerUrl: string,
-  consent: (intent: {
-    op: string;
-    needsSecret: boolean;
-  }) => Promise<{
+  consent: (intent: { op: string; needsSecret: boolean }) => Promise<{
     granted: boolean;
     passphrase: string;
     secret?: string;
