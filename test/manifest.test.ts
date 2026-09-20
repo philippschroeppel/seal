@@ -62,6 +62,26 @@ describe("manifest and CLI", () => {
     });
   });
 
+  it("parses --sandbox flags", () => {
+    expect(
+      parseArgs([
+        "--manifest",
+        "permissions.json",
+        "--sandbox",
+        "--sandbox-network",
+        "host",
+        "--",
+        "agent",
+      ]),
+    ).toEqual({
+      manifest: "permissions.json",
+      sandbox: true,
+      sandboxNetwork: "host",
+      command: "agent",
+      args: [],
+    });
+  });
+
   it("rejects an empty JSON manifest before spawning", () => {
     const dir = mkdtempSync(join(tmpdir(), "seal-empty-"));
     const manifest = join(dir, "manifest.json");
