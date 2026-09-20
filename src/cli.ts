@@ -1,12 +1,17 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
+import { fileURLToPath } from "node:url";
 import { type Approver, type PendingIntent, runWithManifest } from "./agent.js";
 import { formatPendingIntent } from "./intents.js";
 import { loadManifestFile, storeFromManifest } from "./manifest.js";
+import { parseSandbox } from "./sandbox.js";
 
 interface CliArgs {
   readonly manifest: string;
   readonly ttlMs?: number;
+  readonly sandbox?: boolean;
+  readonly sandboxNetwork?: "seal" | "host";
   readonly command: string;
   readonly args: readonly string[];
 }
@@ -15,12 +20,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const parsed = parseArgs(argv);
   const manifest = loadManifestFile(parsed.manifest);
   const store = storeFromManifest(manifest);
+  const sandbox = parsed.sandbox
+    ? parseSandbox({ network: parsed.sandboxNetwork ?? "seal" })
+    : manifest.sandbox;
   const result = await runWithManifest({
     store,
     manifest,
     command: parsed.command,
     args: parsed.args,
     ...(parsed.ttlMs === undefined ? {} : { ttlMs: parsed.ttlMs }),
+    ...(sandbox ? { sandbox } : {}),
     approve: createApprover(),
   });
   return result.exitCode;
@@ -40,6 +49,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 
   let manifest: string | undefined;
   let ttlMs: number | undefined;
+  let sandbox: boolean | undefined;
+  let sandboxNetwork: "seal" | "host" | undefined;
   for (let index = 0; index < flags.length; index += 1) {
     const flag = flags[index];
     const value = flags[index + 1];
@@ -48,6 +59,15 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       index += 1;
     } else if (flag === "--ttl" && value) {
       ttlMs = Number(value);
+      index += 1;
+    } else if (flag === "--sandbox") {
+      sandbox = true;
+    } else if (flag === "--sandbox-network" && value) {
+      if (value !== "seal" && value !== "host") {
+        throw new Error('--sandbox-network must be "seal" or "host"');
+      }
+      sandbox = true;
+      sandboxNetwork = value;
       index += 1;
     } else {
       throw new Error(`unknown flag: ${flag}`);
@@ -59,6 +79,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   return {
     manifest,
     ...(ttlMs === undefined ? {} : { ttlMs }),
+    ...(sandbox ? { sandbox: true } : {}),
+    ...(sandboxNetwork ? { sandboxNetwork } : {}),
     command,
     args: child.slice(1),
   };
@@ -88,12 +110,23 @@ async function promptApprover(intent: PendingIntent): Promise<boolean> {
 
 function usage(): Error {
   return new Error(
-    "usage: seal --manifest <file> [--ttl <ms>] -- <command> [args...]",
+    "usage: seal --manifest <file> [--ttl <ms>] [--sandbox] [--sandbox-network seal|host] -- <command> [args...]",
   );
 }
 
-const entry = process.argv[1] ?? "";
-if (entry.endsWith("cli.ts") || entry.endsWith("cli.js")) {
+function isDirectCliRun(): boolean {
+  const entry = process.argv[1];
+  if (!entry) {
+    return false;
+  }
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return entry.endsWith("cli.ts") || entry.endsWith("cli.js");
+  }
+}
+
+if (isDirectCliRun()) {
   main()
     .then((code) => {
       process.exitCode = code;

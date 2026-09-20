@@ -26,6 +26,14 @@ Seal (PEP)                 on Allow: unseal, use identity, wipe
 ```
 
 ```bash
+seal --manifest examples/agent/manifest.json --sandbox -- agent
+```
+
+`--sandbox` wraps the child in [bubblewrap](https://github.com/containers/bubblewrap) (Linux): empty `$HOME`, no host env, no host `~/.config/gh` / `~/.ssh`, and by default `--unshare-net` so the process cannot make its own TCP. Seal listens on a Unix socket bind-mounted into the jail; `agent.http` / `agent.sign` still work. Pass `--sandbox-network host` (or `"session": { "sandbox": { "network": "host" } }`) if the child must reach the network itself — that is an explicit ambient grant.
+
+Without `--sandbox`, Seal only strips a few env keys. That is not a jail.
+
+```bash
 seal --manifest examples/agent/manifest.json -- agent
 ```
 
@@ -174,6 +182,7 @@ await runWithGrant({
 | `src/session.ts` | Shared grant lease (issue, TTL, wipe) |
 | `src/use.ts` | Unseal, attach, fetch, sign |
 | `src/agent.ts` | Loopback HTTP session, Cedar gate, use-not-read |
+| `src/sandbox.ts` | bubblewrap jail (empty HOME, allowlist env, optional netns) |
 | `src/pdp.ts` / `src/schema.ts` | Frozen Cedar WASM PDP |
 | `src/plugin.ts` | Client-side plugin contract |
 | `src/agent-client.ts` | What an agent or plugin calls |
@@ -198,7 +207,7 @@ await runWithGrant({
 - Agent sessions authorize **use**, not disclosure. A live `gh-token` can still push or create keys unless Cedar forbids those paths.
 - Peer prefixes on an identity are a second gate: `/v1/http` is refused unless the URL is bound to that identity.
 - The session token is in the child's environment. Anyone who can read that env can propose uses until expiry.
-- Child env is stripped of `SEAL_SOCK`, `SSH_AUTH_SOCK`, `GNUPGHOME`, and any `source.env` keys from the manifest. This is not a network namespace.
+- Child env is stripped of `SEAL_SOCK`, `SSH_AUTH_SOCK`, `GNUPGHOME`, and any `source.env` keys from the manifest. Without `--sandbox`, this is not a filesystem or network jail: `gh`, git, and files in `$HOME` still work. `--sandbox` (bubblewrap) is the opt-in confinement: empty home, allowlisted env, and no child TCP unless `--sandbox-network host`.
 - `wipe()` is best-effort. JavaScript runtimes can copy bytes.
 - `MemorySecretStore` keeps DEKs in process memory for its lifetime. Treat it as a stand-in.
 - Response bodies are not redacted. Policy must know dangerous fields.

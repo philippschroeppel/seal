@@ -1,8 +1,11 @@
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import {
   createServer,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import type { RunResult, SpawnOptions } from "./child.js";
 import { spawnChild } from "./child.js";
 import { type ErrorCode, SealError } from "./errors.js";
@@ -23,6 +26,7 @@ import {
 import { OPENAPI_DOCUMENT } from "./openapi.js";
 import { createCedarPdp, type PolicyDecisionPoint } from "./pdp.js";
 import { ENV } from "./protocol.js";
+import type { Sandbox } from "./sandbox.js";
 import { openGrantLease } from "./session.js";
 import { isRecord, type SecretStore, type SessionToken } from "./types.js";
 import {
@@ -58,6 +62,8 @@ export interface AgentSessionOptions {
   readonly sessionId?: string;
   readonly approve?: Approver;
   readonly fetch?: typeof fetch;
+  readonly sandbox?: Sandbox;
+  readonly socketPath?: string;
 }
 
 export interface AgentSession {
@@ -123,23 +129,48 @@ export async function startAgentSession(
     void handleHttp(req, res, state);
   });
 
-  const { url } = await listenLoopback(server);
+  const socketPath = options.socketPath;
+  const { url } = socketPath
+    ? await listenUnix(server, socketPath)
+    : await listenLoopback(server);
 
   return {
     url,
     token: lease.token,
     sessionId,
-    close: () => lease.close(() => server.close()),
+    close: () =>
+      lease.close(() => {
+        server.close();
+        if (socketPath) {
+          try {
+            unlinkSync(socketPath);
+          } catch {
+            /* already gone */
+          }
+        }
+      }),
   };
 }
 
 export async function runWithManifest(
   options: RunManifestOptions,
 ): Promise<RunResult> {
-  const session = await startAgentSession(options);
+  const sandbox = options.sandbox ?? options.manifest.sandbox;
+  const socketDir = sandbox
+    ? mkdtempSync(join(tmpdir(), "seal-http-"))
+    : undefined;
+  const session = await startAgentSession({
+    ...options,
+    ...(sandbox ? { sandbox } : {}),
+    ...(socketDir ? { socketPath: join(socketDir, "http.sock") } : {}),
+  });
   try {
     return await spawnChild(
-      options,
+      {
+        ...options,
+        ...(sandbox ? { sandbox } : {}),
+        ...(socketDir ? { bindDirs: [socketDir] } : {}),
+      },
       {
         [ENV.url]: session.url,
         [ENV.token]: session.token,
@@ -148,6 +179,9 @@ export async function runWithManifest(
     );
   } finally {
     session.close();
+    if (socketDir) {
+      rmSync(socketDir, { recursive: true, force: true });
+    }
   }
 }
 
@@ -535,6 +569,26 @@ function listenLoopback(
         return;
       }
       resolve({ url: `http://127.0.0.1:${addr.port}` });
+    });
+  });
+}
+
+function listenUnix(
+  server: ReturnType<typeof createServer>,
+  socketPath: string,
+): Promise<{ url: string }> {
+  mkdirSync(dirname(socketPath), { recursive: true });
+  try {
+    unlinkSync(socketPath);
+  } catch {
+    /* first listen */
+  }
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, () => {
+      server.off("error", reject);
+      chmodSync(socketPath, 0o600);
+      resolve({ url: `unix://${socketPath}` });
     });
   });
 }

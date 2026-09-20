@@ -27,6 +27,8 @@ export type {
   IdentityAttach,
   IdentityBinding,
   Manifest,
+  Sandbox,
+  SandboxNetwork,
   SecretSource,
 } from "./manifest.js";
 export { loadManifestFile, storeFromManifest } from "./manifest.js";

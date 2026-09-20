@@ -1,8 +1,11 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { SealError } from "./errors.js";
+import { parseSandbox, type Sandbox } from "./sandbox.js";
 import { MemorySecretStore } from "./store.js";
 import { isRecord, type SecretName } from "./types.js";
+
+export type { Sandbox, SandboxNetwork } from "./sandbox.js";
 
 export type ApprovalMode = "never" | "once" | "each";
 
@@ -35,6 +38,7 @@ export interface Manifest {
   readonly ttlMs: number;
   readonly policies: string;
   readonly identities: readonly IdentityBinding[];
+  readonly sandbox?: Sandbox;
 }
 
 const DEFAULT_TTL_MS = 5 * 60_000;
@@ -54,6 +58,8 @@ export function loadManifestFile(path: string): Manifest {
 
   const session = isRecord(raw.session) ? raw.session : undefined;
 
+  const sandbox = parseSandbox(session?.sandbox);
+
   return {
     ...(typeof session?.id === "string" ? { sessionId: session.id } : {}),
     ttlMs:
@@ -62,6 +68,7 @@ export function loadManifestFile(path: string): Manifest {
         : DEFAULT_TTL_MS,
     policies,
     identities: raw.identities.map((item, index) => parseIdentity(item, index)),
+    ...(sandbox ? { sandbox } : {}),
   };
 }
 
