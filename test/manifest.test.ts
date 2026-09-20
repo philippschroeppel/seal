@@ -1,10 +1,14 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseArgs } from "../src/cli.js";
 import { loadManifestFile, storeFromManifest } from "../src/manifest.js";
 import { generateKeyPair } from "../src/seal.js";
+
+const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
 describe("manifest and CLI", () => {
   it("loads Cedar from a sibling file and materializes secrets", () => {
@@ -57,4 +61,68 @@ describe("manifest and CLI", () => {
       args: ["--help"],
     });
   });
+
+  it("rejects an empty JSON manifest before spawning", () => {
+    const dir = mkdtempSync(join(tmpdir(), "seal-empty-"));
+    const manifest = join(dir, "manifest.json");
+    const marker = join(dir, "child-ran");
+    writeFileSync(manifest, "{}");
+
+    const result = runCli(dir, [
+      "--manifest",
+      manifest,
+      "--",
+      "sh",
+      "-c",
+      `echo ran > "${marker}"`,
+    ]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("manifest must include a policies string");
+    expect(result.marker).toBe(false);
+  });
+
+  it("runs when invoked as the seal bin and refuses empty identities", () => {
+    const dir = mkdtempSync(join(tmpdir(), "seal-bin-"));
+    const manifest = join(dir, "manifest.json");
+    const marker = join(dir, "child-ran");
+    writeFileSync(
+      manifest,
+      JSON.stringify({
+        policies: "permit (principal, action, resource);",
+        identities: [],
+      }),
+    );
+
+    const result = runCli(dir, [
+      "--manifest",
+      manifest,
+      "--",
+      "sh",
+      "-c",
+      `echo ran > "${marker}"`,
+    ]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("manifest identities must not be empty");
+    expect(result.marker).toBe(false);
+  });
 });
+
+function runCli(
+  dir: string,
+  args: readonly string[],
+): { status: number | null; stderr: string; marker: boolean } {
+  const bin = join(dir, "seal");
+  symlinkSync(cliPath, bin);
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", bin, ...args],
+    { encoding: "utf8" },
+  );
+  return {
+    status: result.status,
+    stderr: result.stderr,
+    marker: existsSync(join(dir, "child-ran")),
+  };
+}

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
+import { fileURLToPath } from "node:url";
 import { type Approver, type PendingIntent, runWithManifest } from "./agent.js";
 import { formatPendingIntent } from "./intents.js";
 import { loadManifestFile, storeFromManifest } from "./manifest.js";
@@ -92,8 +94,19 @@ function usage(): Error {
   );
 }
 
-const entry = process.argv[1] ?? "";
-if (entry.endsWith("cli.ts") || entry.endsWith("cli.js")) {
+function isDirectCliRun(): boolean {
+  const entry = process.argv[1];
+  if (!entry) {
+    return false;
+  }
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return entry.endsWith("cli.ts") || entry.endsWith("cli.js");
+  }
+}
+
+if (isDirectCliRun()) {
   main()
     .then((code) => {
       process.exitCode = code;
