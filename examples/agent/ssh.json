@@ -1,0 +1,10 @@
+{
+  "session": { "ttlMs": 300000 },
+  "identities": [
+    {
+      "name": "me-ssh",
+      "source": { "file": "~/.ssh/id_ed25519" },
+      "plugins": ["ssh"]
+    }
+  ]
+}
