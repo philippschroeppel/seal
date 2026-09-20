@@ -1,21 +1,25 @@
 import { type AgentConnection, agent } from "../src/index.js";
 
+const GITHUB_API = "https://api.github.com";
+
 /**
- * Agent-side GitHub helpers. They only call `agent.use`; Seal loads the
- * github plugin and attaches the token.
+ * Agent-side GitHub helpers. They only call `agent.use` with the http
+ * plugin. Seal attaches the token; this module never sees it.
  */
 export async function githubRequest(
   path: string,
   init: { method?: string; body?: unknown } = {},
   connection?: AgentConnection,
 ): Promise<{ status: number; body: string }> {
+  const suffix = path.startsWith("/") ? path : `/${path}`;
   return agent.use(
     {
-      plugin: "github",
+      plugin: "http",
       identity: "gh-token",
       input: {
-        path,
-        ...(init.method === undefined ? {} : { method: init.method }),
+        method: init.method ?? "GET",
+        url: `${GITHUB_API}${suffix}`,
+        headers: { Accept: "application/vnd.github+json" },
         ...(init.body === undefined ? {} : { body: init.body }),
       },
     },
@@ -28,13 +32,11 @@ export function createPullRequest(
   body: { title: string; head: string; base: string; body?: string },
   connection?: AgentConnection,
 ): Promise<{ status: number; body: string }> {
-  return agent.use(
+  return githubRequest(
+    `/repos/${repo}/pulls`,
     {
-      plugin: "github",
-      identity: "gh-token",
-      input: {
-        op: "createPullRequest",
-        repo,
+      method: "POST",
+      body: {
         title: body.title,
         head: body.head,
         base: body.base,

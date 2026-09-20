@@ -164,7 +164,7 @@ function testManifest(peerUrl: string): Manifest {
         name: "gh-token",
         secret: "gh-token",
         source: { env: "GITHUB_TOKEN" },
-        plugins: ["http", "github"],
+        plugins: ["http"],
         peers: [peerUrl],
       },
     ],

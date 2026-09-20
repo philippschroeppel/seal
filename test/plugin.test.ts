@@ -22,7 +22,7 @@ afterEach(() => {
   }
 });
 
-describe("github plugin", () => {
+describe("github example (http glue)", () => {
   it("only talks to Seal and never asks for plaintext", async () => {
     await expect(
       createPullRequest("philippschroeppel/seal", {
@@ -37,7 +37,7 @@ describe("github plugin", () => {
     });
   });
 
-  it("runs inside Seal with the unsealed token", async () => {
+  it("calls http through Seal with the unsealed token", async () => {
     const seen: { url: string; authorization: string }[] = [];
     const session = await openGithubSession(async (input, init) => {
       const headers = new Headers(init?.headers);
@@ -69,7 +69,7 @@ describe("github plugin", () => {
     expect(signed.signature).not.toContain(SIGNING_KEY);
   });
 
-  it("refuses a github call when the identity is not granted", async () => {
+  it("refuses an http call when the identity is not granted", async () => {
     const store = new MemorySecretStore();
     store.put("gh-token", TOKEN);
     const session = await startAgentSession({
@@ -85,9 +85,9 @@ describe("github plugin", () => {
     await expect(
       agent.use(
         {
-          plugin: "github",
+          plugin: "http",
           identity: "gh-token",
-          input: { path: "/user" },
+          input: { method: "GET", url: "https://api.github.com/user" },
         },
         session,
       ),
@@ -111,7 +111,7 @@ async function openGithubSession(
         {
           name: "gh-token",
           secret: "gh-token",
-          plugins: ["http", "github"],
+          plugins: ["http"],
           peers: ["https://api.github.com/"],
         },
         {

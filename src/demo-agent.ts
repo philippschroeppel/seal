@@ -158,7 +158,7 @@ function demoManifest(peerUrl: string): Manifest {
       {
         name: "gh-token",
         secret: "gh-token",
-        plugins: ["http", "github"],
+        plugins: ["http"],
         peers: [peerUrl],
       },
       {

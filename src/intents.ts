@@ -1,4 +1,4 @@
-export type PluginName = "http" | "sign" | "ssh" | "github";
+export type PluginName = "http" | "sign" | "ssh";
 
 export interface UseIntent {
   readonly plugin: string;

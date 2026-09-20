@@ -20,7 +20,7 @@ describe("manifest and CLI", () => {
           {
             name: "gh-token",
             source: { env: "GITHUB_TOKEN" },
-            plugins: ["http", "github"],
+            plugins: ["http"],
             peers: ["https://api.github.com/"],
           },
         ],
@@ -29,7 +29,7 @@ describe("manifest and CLI", () => {
 
     const manifest = loadManifestFile(join(dir, "manifest.json"));
     expect(manifest.identities[0]?.name).toBe("gh-token");
-    expect(manifest.identities[0]?.plugins).toEqual(["http", "github"]);
+    expect(manifest.identities[0]?.plugins).toEqual(["http"]);
     expect(manifest).not.toHaveProperty("policies");
 
     const store = storeFromManifest(manifest, { GITHUB_TOKEN: "from-env" });

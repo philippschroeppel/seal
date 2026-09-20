@@ -1,6 +1,5 @@
 import { SealError } from "./errors.js";
 import type { IdentityBinding } from "./manifest.js";
-import { githubPlugin } from "./plugins/github.js";
 import { httpPlugin } from "./plugins/http.js";
 import { signPlugin } from "./plugins/sign.js";
 import { sshPlugin } from "./plugins/ssh.js";
@@ -25,10 +24,7 @@ export interface Plugin {
 }
 
 const builtins: ReadonlyMap<string, Plugin> = new Map(
-  [httpPlugin, signPlugin, sshPlugin, githubPlugin].map((plugin) => [
-    plugin.name,
-    plugin,
-  ]),
+  [httpPlugin, signPlugin, sshPlugin].map((plugin) => [plugin.name, plugin]),
 );
 
 export function getPlugin(name: string): Plugin {

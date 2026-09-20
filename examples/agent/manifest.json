@@ -11,7 +11,7 @@
     {
       "name": "gh-token",
       "source": { "env": "GITHUB_TOKEN" },
-      "plugins": ["http", "github"],
+      "plugins": ["http"],
       "peers": ["https://api.github.com/"],
       "attach": { "type": "bearer", "header": "Authorization", "scheme": "Bearer" }
     },

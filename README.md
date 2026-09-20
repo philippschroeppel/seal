@@ -74,9 +74,8 @@ const { signature } = await signGit(commitPayload);
 | `ssh` | OpenSSH ed25519: public key + git SSH signatures |
 | `http` | Fetch an allowlisted peer and attach a bearer token |
 | `sign` | HMAC-SHA-256 or raw ed25519 over a payload |
-| `github` | GitHub API (`path` or `createPullRequest`) |
 
-`examples/ssh-plugin.ts` and `examples/github-plugin.ts` are agent-side glue. The plugins run inside Seal.
+`examples/ssh-plugin.ts` is agent-side glue over `ssh`. `examples/github-plugin.ts` is agent-side glue over `http` (GitHub is not a Seal plugin).
 
 ## Manifest
 
@@ -127,7 +126,7 @@ await runWithManifest({
 | `src/store.ts` | Named encrypt-at-rest vault |
 | `src/session.ts` | Token, TTL, wipe |
 | `src/agent.ts` | `use` / `put` / `request` |
-| `src/plugins/` | Built-in ssh, http, sign, github |
+| `src/plugins/` | Built-in ssh, http, sign |
 | `src/ssh-key.ts` | OpenSSH parse / unlock / SSHSIG |
 | `src/sandbox.ts` | bubblewrap jail |
 | `src/cli.ts` | `seal --manifest … -- <cmd>` |
@@ -136,7 +135,7 @@ await runWithManifest({
 ## Security notes
 
 - Agent sessions authorize **use**, not disclosure. A live token can still do whatever its plugin allows.
-- Peer prefixes on an identity are the http/github allowlist.
+- Peer prefixes on an identity are the http allowlist.
 - The session token is in the child's environment.
 - `wipe()` is best-effort. JavaScript runtimes can copy bytes.
 - Response bodies are not redacted.

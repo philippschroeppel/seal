@@ -9,7 +9,7 @@ agent                      untrusted, speaks HTTP only
 Seal session               grant check, consent, wipe
   │
   ▼
-built-in plugin            http | sign | github
+built-in plugin            ssh | http | sign
   │  (unsealed secret)
   ▼
 peer / signature
@@ -38,7 +38,8 @@ Consent is entering a passphrase, not `[y/N]`. If the name is not in the store, 
 | `ssh` | `{ op: "sign", payload, namespace? }` or `{ op: "publicKey" }` | OpenSSH ed25519; git SSHSIG |
 | `http` | `{ method, url, headers?, body? }` | attach bearer, fetch allowlisted peer |
 | `sign` | `{ payload, format }` | hmac-sha256 or ed25519 |
-| `github` | `{ path, method?, body? }` or `{ op: "createPullRequest", ... }` | talk to `api.github.com` |
+
+GitHub is not a plugin. An agent-side helper calls `http` with `peers: ["https://api.github.com/"]`.
 
 Plugins are registered in-process. Seal does not load user modules.
 
