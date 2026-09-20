@@ -1,0 +1,20 @@
+{
+  "session": {
+    "ttlMs": 300000
+  },
+  "identities": [
+    {
+      "name": "gh-token",
+      "source": { "env": "GITHUB_TOKEN" },
+      "plugins": ["http", "github"],
+      "peers": ["https://api.github.com/"],
+      "attach": { "type": "bearer", "header": "Authorization", "scheme": "Bearer" }
+    },
+    {
+      "name": "me-sign",
+      "source": { "env": "SEAL_SIGNING_KEY" },
+      "plugins": ["sign"],
+      "format": "hmac-sha256"
+    }
+  ]
+}
