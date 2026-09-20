@@ -35,6 +35,7 @@ Consent is entering a passphrase, not `[y/N]`. If the name is not in the store, 
 
 | Plugin | Input | What Seal does |
 | --- | --- | --- |
+| `ssh` | `{ op: "sign", payload, namespace? }` or `{ op: "publicKey" }` | OpenSSH ed25519; git SSHSIG |
 | `http` | `{ method, url, headers?, body? }` | attach bearer, fetch allowlisted peer |
 | `sign` | `{ payload, format }` | hmac-sha256 or ed25519 |
 | `github` | `{ path, method?, body? }` or `{ op: "createPullRequest", ... }` | talk to `api.github.com` |

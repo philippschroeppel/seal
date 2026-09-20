@@ -6,6 +6,7 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { wipe } from "./bytes.js";
 import { type RunResult, type SpawnOptions, spawnChild } from "./child.js";
 import { type ErrorCode, SealError } from "./errors.js";
 import type {
@@ -24,6 +25,11 @@ import { getPlugin } from "./plugin.js";
 import { ENV } from "./protocol.js";
 import type { Sandbox } from "./sandbox.js";
 import { openSessionLease } from "./session.js";
+import {
+  isEncryptedOpenSshKey,
+  isOpenSshPrivateKey,
+  parseOpenSshPrivateKey,
+} from "./ssh-key.js";
 import { isRecord, type SecretStore, type SessionToken } from "./types.js";
 
 export type {
@@ -75,6 +81,7 @@ interface SessionState {
   readonly granted: Set<string>;
   readonly consent?: Consenter;
   readonly fetch: typeof fetch;
+  readonly unlocked: Map<string, string>;
   expired: () => boolean;
 }
 
@@ -114,6 +121,7 @@ export async function startAgentSession(
     granted,
     ...(options.consent ? { consent: options.consent } : {}),
     fetch: options.fetch ?? globalThis.fetch,
+    unlocked: new Map(),
     expired: lease.expired,
   };
 
@@ -241,12 +249,14 @@ async function performUse(
     );
   }
   const plugin = getPlugin(intent.plugin);
-  return state.store.use(identity.secret, (secret) =>
-    plugin.use(secret, intent.input, {
+  return state.store.use(identity.secret, async (secret) => {
+    const passphrase = await passphraseForUse(state, identity, secret);
+    return plugin.use(secret, intent.input, {
       identity,
       fetch: state.fetch,
-    }),
-  );
+      ...(passphrase === undefined ? {} : { passphrase }),
+    });
+  });
 }
 
 async function performPut(
@@ -331,10 +341,59 @@ async function askConsent(
   if (!consent.granted) {
     throw new SealError("approval_required", "human consent required");
   }
-  if (intent.op === "request" && !consent.passphrase) {
+  if (
+    (intent.op === "request" || intent.op === "unlock") &&
+    !consent.passphrase
+  ) {
     throw new SealError("approval_required", "consent requires a passphrase");
   }
   return consent;
+}
+
+async function passphraseForUse(
+  state: SessionState,
+  identity: IdentityBinding,
+  secret: string,
+): Promise<string | undefined> {
+  const cached = state.unlocked.get(identity.name);
+  if (cached) {
+    return cached;
+  }
+  if (!isOpenSshPrivateKey(secret) || !isEncryptedOpenSshKey(secret)) {
+    return state.passphrase;
+  }
+
+  const candidates = [state.unlocked.get(identity.name), state.passphrase];
+  for (const candidate of candidates) {
+    if (candidate && canUnlockSsh(secret, candidate)) {
+      state.unlocked.set(identity.name, candidate);
+      return candidate;
+    }
+  }
+
+  const consent = await askConsent(state, {
+    op: "unlock",
+    identity: identity.name,
+    plugin: "ssh",
+    needsSecret: false,
+    reason: "encrypted SSH key",
+  });
+  const typed = consent.passphrase;
+  if (!typed || !canUnlockSsh(secret, typed)) {
+    throw new SealError("decrypt_failed", "SSH key passphrase did not match");
+  }
+  state.unlocked.set(identity.name, typed);
+  return typed;
+}
+
+function canUnlockSsh(secret: string, passphrase: string): boolean {
+  try {
+    const key = parseOpenSshPrivateKey(secret, passphrase);
+    wipe(key.secretSeed);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function bindingFromIntent(

@@ -30,7 +30,11 @@ export type {
   SandboxNetwork,
   SecretSource,
 } from "./manifest.js";
-export { loadManifestFile, storeFromManifest } from "./manifest.js";
+export {
+  loadManifestFile,
+  resolveSecretPath,
+  storeFromManifest,
+} from "./manifest.js";
 export type { Plugin, PluginContext } from "./plugin.js";
 export { builtinPluginNames, getPlugin } from "./plugin.js";
 export { MemorySecretStore } from "./store.js";

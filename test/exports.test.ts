@@ -11,7 +11,12 @@ describe("public exports", () => {
     expect(seal).toHaveProperty("agent");
     expect(seal).toHaveProperty("startAgentSession");
     expect(seal).toHaveProperty("MemorySecretStore");
-    expect(seal.builtinPluginNames()).toEqual(["http", "sign", "github"]);
+    expect(seal.builtinPluginNames()).toEqual([
+      "http",
+      "sign",
+      "ssh",
+      "github",
+    ]);
     expect(seal.agent).toHaveProperty("use");
     expect(seal.agent).toHaveProperty("put");
     expect(seal.agent).toHaveProperty("request");

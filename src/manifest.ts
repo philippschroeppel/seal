@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { SealError } from "./errors.js";
 import { parseSandbox, type Sandbox } from "./sandbox.js";
@@ -150,6 +151,16 @@ function parseAttach(
   };
 }
 
+export function resolveSecretPath(file: string, cwd: string): string {
+  if (file === "~") {
+    return homedir();
+  }
+  if (file.startsWith("~/")) {
+    return resolve(homedir(), file.slice(2));
+  }
+  return resolve(cwd, file);
+}
+
 function readSecret(
   identity: IdentityBinding,
   env: NodeJS.ProcessEnv,
@@ -172,7 +183,7 @@ function readSecret(
     }
   }
   if (source.file) {
-    return readFileSync(resolve(cwd, source.file), "utf8").trimEnd();
+    return readFileSync(resolveSecretPath(source.file, cwd), "utf8").trimEnd();
   }
   throw new SealError(
     "unknown_secret",

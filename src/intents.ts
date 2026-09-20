@@ -1,4 +1,4 @@
-export type PluginName = "http" | "sign" | "github";
+export type PluginName = "http" | "sign" | "ssh" | "github";
 
 export interface UseIntent {
   readonly plugin: string;
@@ -22,7 +22,7 @@ export interface RequestIntent {
 }
 
 export interface PendingIntent {
-  readonly op: "request" | "put";
+  readonly op: "request" | "put" | "unlock";
   readonly identity: string;
   readonly plugin?: string;
   readonly peers?: readonly string[];
@@ -36,6 +36,9 @@ export function formatPendingIntent(intent: PendingIntent): string {
   const extra = intent.reason ? ` (${intent.reason})` : "";
   if (intent.op === "put") {
     return `store ${intent.identity}${plugin}${extra}`;
+  }
+  if (intent.op === "unlock") {
+    return `unlock ${intent.identity}${plugin}${extra}`;
   }
   if (intent.needsSecret) {
     return `grant new ${intent.identity}${plugin}${extra}`;

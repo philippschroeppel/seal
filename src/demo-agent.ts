@@ -1,4 +1,8 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runWithManifest } from "./agent.js";
 import { agent } from "./agent-client.js";
 import { isSealError } from "./errors.js";
@@ -10,6 +14,28 @@ const SIGNING_KEY = "demo-hmac-key";
 const EXTRA = "deposited-without-the-agent-seeing";
 
 async function runAsChild(): Promise<void> {
+  console.log("[child] ssh public key (no private material)...");
+  const published = await agent.use<{
+    publicKey: string;
+    fingerprint: string;
+  }>({
+    plugin: "ssh",
+    identity: "me-ssh",
+    input: { op: "publicKey" },
+  });
+  console.log("[child] fingerprint", published.fingerprint);
+  if (published.publicKey.includes("BEGIN OPENSSH")) {
+    console.log("[child] leaked the private key into publicKey");
+  }
+
+  console.log("[child] git SSH signature...");
+  const ssh = await agent.use<{ signature: string }>({
+    plugin: "ssh",
+    identity: "me-ssh",
+    input: { op: "sign", namespace: "git", payload: "demo-commit" },
+  });
+  console.log("[child] sshsig", ssh.signature.split("\n")[0]);
+
   console.log("[child] use http on the pre-granted identity...");
   const allowed = await agent.use<{ status: number; body: string }>({
     plugin: "http",
@@ -94,6 +120,7 @@ async function runAsCli(): Promise<void> {
     const store = new MemorySecretStore();
     store.put("gh-token", TOKEN);
     store.put("me-sign", SIGNING_KEY);
+    store.put("me-ssh", generateDemoSshKey());
 
     const self = process.argv[1];
     if (!self) {
@@ -140,6 +167,11 @@ function demoManifest(peerUrl: string): Manifest {
         plugins: ["sign"],
         format: "hmac-sha256",
       },
+      {
+        name: "me-ssh",
+        secret: "me-ssh",
+        plugins: ["ssh"],
+      },
     ],
   };
 }
@@ -181,6 +213,20 @@ function listen(server: Server): Promise<{ url: string; close: () => void }> {
       });
     });
   });
+}
+
+function generateDemoSshKey(): string {
+  const dir = mkdtempSync(join(tmpdir(), "seal-demo-ssh-"));
+  const file = join(dir, "id_ed25519");
+  const result = spawnSync(
+    "ssh-keygen",
+    ["-t", "ed25519", "-f", file, "-N", "", "-C", "seal-demo", "-q"],
+    { encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    throw new Error(result.stderr || "ssh-keygen failed");
+  }
+  return readFileSync(file, "utf8");
 }
 
 function describe(error: unknown): string {

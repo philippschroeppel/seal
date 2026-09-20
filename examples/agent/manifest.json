@@ -4,6 +4,11 @@
   },
   "identities": [
     {
+      "name": "me-ssh",
+      "source": { "file": "~/.ssh/id_ed25519" },
+      "plugins": ["ssh"]
+    },
+    {
       "name": "gh-token",
       "source": { "env": "GITHUB_TOKEN" },
       "plugins": ["http", "github"],

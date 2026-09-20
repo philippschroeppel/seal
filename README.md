@@ -14,12 +14,10 @@ The child has three calls:
 
 ```ts
 import { agent } from "seal";
+import { signGit, sshPublicKey } from "./examples/ssh-plugin.ts";
 
-await agent.use({
-  plugin: "http",
-  identity: "gh-token",
-  input: { method: "GET", url: "https://api.github.com/user" },
-});
+await sshPublicKey();
+await signGit(commitPayload);
 
 await agent.put({ name: "deploy-token", plugin: "http", peers: ["https://api.example.com/"] });
 await agent.request({ name: "deploy-token" });
@@ -35,43 +33,54 @@ A secret created with `put` is treated like one the user never granted at start.
 
 There is no `getSecret`. `/secrets` is 404.
 
-## Built-in plugins
+## SSH keys (the main path)
 
-| Plugin | Job |
-| --- | --- |
-| `http` | Fetch an allowlisted peer and attach a bearer token |
-| `sign` | HMAC-SHA-256 or ed25519 over a payload |
-| `github` | GitHub API (`path` or `createPullRequest`) |
-
-```ts
-import { createPullRequest } from "./examples/github-plugin.ts";
-
-await createPullRequest("acme/seal", {
-  title: "demo",
-  head: "feature",
-  base: "main",
-});
-```
-
-`examples/github-plugin.ts` is agent-side glue. The real github plugin runs inside Seal.
-
-## Manifest
-
-Pre-task grant is the identity list. Secrets come from env/file (or a parent `store.put`). No Cedar file.
+The private key stays in the parent. The manifest only names the file:
 
 ```json
 {
   "session": { "ttlMs": 300000 },
   "identities": [
     {
-      "name": "gh-token",
-      "source": { "env": "GITHUB_TOKEN" },
-      "plugins": ["http", "github"],
-      "peers": ["https://api.github.com/"]
+      "name": "me-ssh",
+      "source": { "file": "~/.ssh/id_ed25519" },
+      "plugins": ["ssh"]
     }
   ]
 }
 ```
+
+```bash
+seal --manifest examples/agent/ssh.json -- agent
+```
+
+If the key is encrypted, Seal asks for **that key's passphrase** on first `use` — not `[y/N]`. The agent never receives the PEM.
+
+```ts
+import { signGit, sshPublicKey } from "./examples/ssh-plugin.ts";
+
+const { publicKey, fingerprint } = await sshPublicKey();
+const { signature } = await signGit(commitPayload);
+```
+
+`signature` is an OpenSSH `SSHSIG` (namespace `git` by default). `ssh-keygen -Y verify` accepts it. ed25519 only for now.
+
+`--sandbox` hides host `~/.ssh` from the child, so the agent cannot open the file itself.
+
+## Built-in plugins
+
+| Plugin | Job |
+| --- | --- |
+| `ssh` | OpenSSH ed25519: public key + git SSH signatures |
+| `http` | Fetch an allowlisted peer and attach a bearer token |
+| `sign` | HMAC-SHA-256 or raw ed25519 over a payload |
+| `github` | GitHub API (`path` or `createPullRequest`) |
+
+`examples/ssh-plugin.ts` and `examples/github-plugin.ts` are agent-side glue. The plugins run inside Seal.
+
+## Manifest
+
+Pre-task grant is the identity list. Secrets come from a parent file/env (or `store.put`). `~` in `source.file` expands to `$HOME`.
 
 Mid-task, `request` can grant a name that was not in this list after the human enters a passphrase.
 
@@ -118,10 +127,11 @@ await runWithManifest({
 | `src/store.ts` | Named encrypt-at-rest vault |
 | `src/session.ts` | Token, TTL, wipe |
 | `src/agent.ts` | `use` / `put` / `request` |
-| `src/plugins/` | Built-in http, sign, github |
+| `src/plugins/` | Built-in ssh, http, sign, github |
+| `src/ssh-key.ts` | OpenSSH parse / unlock / SSHSIG |
 | `src/sandbox.ts` | bubblewrap jail |
 | `src/cli.ts` | `seal --manifest … -- <cmd>` |
-| `examples/github-plugin.ts` | Agent-side GitHub helpers |
+| `examples/ssh-plugin.ts` | Agent-side SSH helpers |
 
 ## Security notes
 
